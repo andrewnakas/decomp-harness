@@ -23,10 +23,12 @@ app = typer.Typer(
 )
 import_app = typer.Typer(help="Ingest what is already known.", no_args_is_help=True)
 corpus_app = typer.Typer(help="Bound the work by call-graph closure.", no_args_is_help=True)
+queue_app = typer.Typer(help="What to work on next, and why.", no_args_is_help=True)
 llm_app = typer.Typer(help="Provider smoke tests and the token ledger.", no_args_is_help=True)
 lesson_app = typer.Typer(help="Traps recorded as checks.", no_args_is_help=True)
 app.add_typer(import_app, name="import")
 app.add_typer(corpus_app, name="corpus")
+app.add_typer(queue_app, name="queue")
 app.add_typer(llm_app, name="llm")
 app.add_typer(lesson_app, name="lesson")
 
@@ -408,6 +410,71 @@ def screen(
     out.set_json(json_out)
     out.emit(run_screen(_open(project), subsystem=subsystem, scope=scope,
                         limit=limit, force=force))
+
+
+# --------------------------------------------------------------------- queue
+@queue_app.command("build")
+def queue_build(
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    no_cluster: Annotated[bool, typer.Option("--no-cluster", help="Skip family clustering")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Assign tiers, difficulty and families across the corpus."""
+    from ..pipeline.queue import build
+
+    out.set_json(json_out)
+    out.emit(build(_open(project), subsystem=subsystem, cluster=not no_cluster, force=force))
+
+
+@queue_app.command("next")
+def queue_next(
+    n: Annotated[int, typer.Option("-n", help="How many")] = 16,
+    tier: Annotated[str, typer.Option(help="A B C D E F L U")] = "",
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    status: Annotated[str, typer.Option(help="Only this status")] = "",
+    include_gated: Annotated[bool, typer.Option(help="Include gated functions")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """The next functions worth a model's attention."""
+    from ..pipeline.queue import next_items
+
+    out.set_json(json_out)
+    out.emit(next_items(_open(project), tier=tier, limit=n, subsystem=subsystem,
+                        status=status, include_gated=include_gated))
+
+
+@queue_app.command("report")
+def queue_report(
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Tier and status cross-tab."""
+    from ..pipeline.queue import report
+
+    out.set_json(json_out)
+    out.emit(report(_open(project), subsystem=subsystem))
+
+
+@queue_app.command("set")
+def queue_set(
+    addr: Annotated[str, typer.Argument(help="Function address")],
+    status: Annotated[str, typer.Option(help="New status")] = "",
+    note: Annotated[str, typer.Option(help="Short note")] = "",
+    tier: Annotated[str, typer.Option(help="New tier")] = "",
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Override one function's queue record."""
+    from ..core.db import addr_str, parse_addr
+    from ..pipeline.queue import set_status
+
+    out.set_json(json_out)
+    proj = _open(project)
+    a = parse_addr(addr)
+    try:
+        row = set_status(proj, a, status=status or None, note=note or None, tier=tier or None)
+    except ValueError as exc:
+        out.fail(str(exc))
+    out.emit(f"{addr_str(a)}\t{row.get('tier')}\t{row.get('status')}")
 
 
 def main() -> None:
