@@ -412,6 +412,23 @@ def corpus_grow(
                   subsystem=subsystem, max_depth=max_depth, stop_kinds=stop, force=force))
 
 
+# -------------------------------------------------------------------- analyze
+@app.command()
+def analyze(
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    scope: Annotated[str, typer.Option(help="corpus | all")] = "corpus",
+    limit: Annotated[int, typer.Option(help="Decompile only the hottest N")] = 0,
+    redo: Annotated[bool, typer.Option(help="Re-decompile functions already cached")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Decompile the corpus in one engine session."""
+    from ..pipeline.analyze import run as run_analyze
+
+    out.set_json(json_out)
+    out.emit(run_analyze(_open(project), subsystem=subsystem, scope=scope,
+                         limit=limit, redo=redo, force=force))
+
+
 # -------------------------------------------------------------------- screen
 @app.command()
 def screen(

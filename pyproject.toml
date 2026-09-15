@@ -38,3 +38,6 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: needs a JVM or a real toolchain; run with -m slow",
+]
