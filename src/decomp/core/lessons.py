@@ -194,7 +194,7 @@ SEED_LESSONS: tuple[Lesson, ...] = (
 )
 
 
-def seed(project: "Project") -> int:
+def seed(project: Project) -> int:
     """Insert the seed lessons that are not already present. Returns count added."""
     added = 0
     for lesson in SEED_LESSONS:
@@ -220,15 +220,15 @@ def seed(project: "Project") -> int:
     return added
 
 
-def for_stage(project: "Project", stage: str) -> list[dict]:
+def for_stage(project: Project, stage: str) -> list[dict]:
     return project.db.query("SELECT * FROM lesson WHERE trigger=? ORDER BY id", (stage,))
 
 
-def all_lessons(project: "Project") -> list[dict]:
+def all_lessons(project: Project) -> list[dict]:
     return project.db.query("SELECT * FROM lesson ORDER BY id")
 
 
-def bump(project: "Project", key: str) -> None:
+def bump(project: Project, key: str) -> None:
     project.db.execute("UPDATE lesson SET hits = hits + 1 WHERE key=?", (key,))
 
 
@@ -236,14 +236,14 @@ def bump(project: "Project", key: str) -> None:
 # Each returns (ok, message). They are deliberately cheap and side-effect free.
 
 
-def check_fixhelpers_applied(project: "Project", **_: object) -> tuple[bool, str]:
+def check_fixhelpers_applied(project: Project, **_: object) -> tuple[bool, str]:
     done = project.db.meta_get("engine.fixhelpers_applied")
     if done:
         return True, f"FixHelpers applied ({done})"
     return False, "FixHelpers has not been applied to the Ghidra program"
 
 
-def check_build_verified(project: "Project", **_: object) -> tuple[bool, str]:
+def check_build_verified(project: Project, **_: object) -> tuple[bool, str]:
     row = project.db.one("SELECT * FROM build ORDER BY id DESC LIMIT 1")
     if not row:
         return True, "no build yet"
@@ -252,14 +252,14 @@ def check_build_verified(project: "Project", **_: object) -> tuple[bool, str]:
     return False, f"build {row['id']} did not pass symbol/mtime verification"
 
 
-def check_session_build_fresh(project: "Project", **_: object) -> tuple[bool, str]:
+def check_session_build_fresh(project: Project, **_: object) -> tuple[bool, str]:
     build = project.db.one("SELECT * FROM build WHERE ok=1 ORDER BY id DESC LIMIT 1")
     if not build:
         return False, "no successful build to run a session against"
     return True, f"latest good build is {build['id']}"
 
 
-def check_negative_controls(project: "Project", **_: object) -> tuple[bool, str]:
+def check_negative_controls(project: Project, **_: object) -> tuple[bool, str]:
     row = project.db.one("SELECT * FROM session ORDER BY id DESC LIMIT 1")
     if not row:
         return True, "no session yet"
@@ -268,14 +268,14 @@ def check_negative_controls(project: "Project", **_: object) -> tuple[bool, str]
     return False, f"session {row['id']} has no failing negative control; verdicts untrusted"
 
 
-def check_session_flags(project: "Project", **_: object) -> tuple[bool, str]:
+def check_session_flags(project: Project, **_: object) -> tuple[bool, str]:
     flags = project.get("session.required_flags", [])
     if not flags:
         return True, "no required session flags configured"
     return True, f"required flags configured: {' '.join(flags)}"
 
 
-def run_checks(project: "Project", stage: str = "") -> list[tuple[str, bool, str]]:
+def run_checks(project: Project, stage: str = "") -> list[tuple[str, bool, str]]:
     """Run the checks for a stage (or all of them). Returns (key, ok, message)."""
     import importlib
 

@@ -50,7 +50,7 @@ class ScreenResult:
         p.db.meta_get("truth.lifted_dir"),
     ],
 )
-def screen(project: "Project", ctx, subsystem: str = "", scope: str = "corpus",
+def screen(project: Project, ctx, subsystem: str = "", scope: str = "corpus",
            limit: int = 0) -> ScreenResult:
     """Screen corpus functions for the four verification gates."""
     from ..adapters.groundtruth.lifted_rexglue import from_project as truth_from_project

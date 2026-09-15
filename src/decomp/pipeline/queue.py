@@ -102,7 +102,7 @@ class QueueListResult:
         kw.get("cluster"),
     ],
 )
-def build(project: "Project", ctx, subsystem: str = "", cluster: bool = True) -> QueueBuildResult:
+def build(project: Project, ctx, subsystem: str = "", cluster: bool = True) -> QueueBuildResult:
     """Assign tiers, difficulty and families across the corpus."""
     from ..adapters.groundtruth.lifted_rexglue import from_project as truth_from_project
 
@@ -196,7 +196,7 @@ def _census_for(row: dict[str, Any]) -> dict[str, Any]:
 
 
 # -------------------------------------------------------------------- next
-def next_items(project: "Project", tier: str = "", limit: int = 16,
+def next_items(project: Project, tier: str = "", limit: int = 16,
                subsystem: str = "", status: str = "", include_gated: bool = False,
                family_first: bool = True) -> QueueListResult:
     """The next functions worth a model's attention.
@@ -279,7 +279,7 @@ class QueueReport:
         return f"{body}\n{tail}"
 
 
-def report(project: "Project", subsystem: str = "") -> QueueReport:
+def report(project: Project, subsystem: str = "") -> QueueReport:
     where = "WHERE in_corpus=1"
     params: list = []
     if subsystem:
@@ -300,7 +300,7 @@ def report(project: "Project", subsystem: str = "") -> QueueReport:
     )
 
 
-def set_status(project: "Project", addr: int, **fields: Any) -> dict:
+def set_status(project: Project, addr: int, **fields: Any) -> dict:
     allowed = {
         "status", "tier", "gate", "gate_reason", "note", "attempts",
         "difficulty", "family_id",

@@ -22,11 +22,11 @@ def estimate(text: str, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> int
     return max(1, round(len(text) / chars_per_token))
 
 
-def estimate_for(project: "Project", text: str) -> int:
+def estimate_for(project: Project, text: str) -> int:
     return estimate(text, ratio_for(project))
 
 
-def ratio_for(project: "Project") -> float:
+def ratio_for(project: Project) -> float:
     raw = project.db.meta_get(META_KEY)
     try:
         return float(raw) if raw else DEFAULT_CHARS_PER_TOKEN
@@ -34,7 +34,7 @@ def ratio_for(project: "Project") -> float:
         return DEFAULT_CHARS_PER_TOKEN
 
 
-def calibrate(project: "Project", sent_chars: int, reported_tokens: int) -> float:
+def calibrate(project: Project, sent_chars: int, reported_tokens: int) -> float:
     """Blend a new observation into the running chars-per-token estimate."""
     if reported_tokens <= 0 or sent_chars <= 0:
         return ratio_for(project)

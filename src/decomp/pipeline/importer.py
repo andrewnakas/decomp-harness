@@ -39,7 +39,7 @@ class ImportResult:
 
 # ----------------------------------------------------------------- image
 @stage("import.image", inputs=lambda p, **kw: [str(kw.get("path")), kw.get("base")])
-def import_image(project: "Project", ctx, path: Path | str, base: int | None = None,
+def import_image(project: Project, ctx, path: Path | str, base: int | None = None,
                  name: str = "") -> ImportResult:
     """Register the target image: the bytes everything else refers to."""
     path = Path(path).resolve()
@@ -75,7 +75,7 @@ def import_image(project: "Project", ctx, path: Path | str, base: int | None = N
     "import.lifted",
     inputs=lambda p, **kw: [str(kw.get("path")), _dir_sig(kw.get("path"))],
 )
-def import_lifted(project: "Project", ctx, path: Path | str,
+def import_lifted(project: Project, ctx, path: Path | str,
                   pattern: str = "*_recomp.*.cpp") -> ImportResult:
     """Index the lifted corpus into function, xref and const_ref rows.
 
@@ -144,7 +144,7 @@ def import_lifted(project: "Project", ctx, path: Path | str,
 
 
 @stage("import.xrefs", inputs=lambda p, **kw: [kw.get("scope"), _dir_sig(p.db.meta_get('truth.lifted_dir'))])
-def import_xrefs(project: "Project", ctx, scope: str = "corpus") -> ImportResult:
+def import_xrefs(project: Project, ctx, scope: str = "corpus") -> ImportResult:
     """Record call edges and constants for functions in scope.
 
     Done separately from the index because it reads every body: cheap for a
@@ -185,7 +185,7 @@ def import_xrefs(project: "Project", ctx, scope: str = "corpus") -> ImportResult
 
 # ----------------------------------------------------------------- names
 @stage("import.names", inputs=lambda p, **kw: [str(kw.get("path")), _file_sig(kw.get("path"))])
-def import_names(project: "Project", ctx, path: Path | str, kind: str = "ingest",
+def import_names(project: Project, ctx, path: Path | str, kind: str = "ingest",
                  confidence: float = 0.8) -> ImportResult:
     """Import a names table (CSV `addr,name` or TOML `"0xADDR" = "name"`)."""
     path = Path(path)
@@ -243,7 +243,7 @@ TYPE_SIZES = {
 
 
 @stage("import.structs", inputs=lambda p, **kw: [str(kw.get("path")), _file_sig(kw.get("path"))])
-def import_structs(project: "Project", ctx, path: Path | str) -> ImportResult:
+def import_structs(project: Project, ctx, path: Path | str) -> ImportResult:
     """Parse a recovered-layout header into struct/field rows with citations.
 
     The header's own convention is the evidence model: every field carries
@@ -288,7 +288,7 @@ def import_structs(project: "Project", ctx, path: Path | str) -> ImportResult:
     )
 
 
-def _store_struct(project: "Project", name: str, body: list[tuple[int, str]],
+def _store_struct(project: Project, name: str, body: list[tuple[int, str]],
                   cites: list[str], source: str) -> tuple[int, int]:
     project.db.upsert("struct", {"name": name, "origin": "ingest"}, "name")
     struct_id = project.db.scalar("SELECT id FROM struct WHERE name=?", (name,))
@@ -352,7 +352,7 @@ def _store_struct(project: "Project", name: str, body: list[tuple[int, str]],
 # ---------------------------------------------------------------- traces
 @stage("import.trace", inputs=lambda p, **kw: [str(kw.get("path")), kw.get("profile"),
                                                _file_sig(kw.get("path"))])
-def import_trace(project: "Project", ctx, path: Path | str,
+def import_trace(project: Project, ctx, path: Path | str,
                  profile: str = "play") -> ImportResult:
     """Import a guest execution trace.
 
@@ -441,7 +441,7 @@ def _parse_trace_line(line: str) -> tuple[int, str] | None:
 
 # ---------------------------------------------------------- prior verdicts
 @stage("import.queue", inputs=lambda p, **kw: [str(kw.get("path")), _file_sig(kw.get("path"))])
-def import_queue(project: "Project", ctx, path: Path | str) -> ImportResult:
+def import_queue(project: Project, ctx, path: Path | str) -> ImportResult:
     """Import a previous project's work queue: statuses, gates, call counts.
 
     Re-verifying what is already verified is the most expensive kind of waste,
@@ -498,7 +498,7 @@ def import_queue(project: "Project", ctx, path: Path | str) -> ImportResult:
 
 # ----------------------------------------------------------------- notes
 @stage("import.notes", inputs=lambda p, **kw: [str(kw.get("path")), _dir_sig(kw.get("path"))])
-def import_notes(project: "Project", ctx, path: Path | str) -> ImportResult:
+def import_notes(project: Project, ctx, path: Path | str) -> ImportResult:
     """Import per-function notes, trimmed to what fits in a packet header.
 
     The originals average 4 KB each; roughly 850 KB of prose across a corpus.
@@ -540,7 +540,7 @@ def _summarize_note(text: str) -> str:
 
 # ------------------------------------------------------- decompiler output
 @stage("import.decomp", inputs=lambda p, **kw: [str(kw.get("path")), _dir_sig(kw.get("path"))])
-def import_decompiled(project: "Project", ctx, path: Path | str,
+def import_decompiled(project: Project, ctx, path: Path | str,
                       pattern: str = "sub_*.c") -> ImportResult:
     """Register existing decompiler output as the C view for each function.
 

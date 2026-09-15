@@ -55,7 +55,7 @@ class StatusResult:
         return "\n".join(lines)
 
 
-def run(project: "Project") -> StatusResult:
+def run(project: Project) -> StatusResult:
     db = project.db
     return StatusResult(
         target=project.target_row(),

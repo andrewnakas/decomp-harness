@@ -61,7 +61,7 @@ class Packet:
 _FIELD_CACHE: dict[tuple[int, str], dict[int, str]] = {}
 
 
-def _fields_for(project: "Project", struct_hint: str = "") -> dict[int, str]:
+def _fields_for(project: Project, struct_hint: str = "") -> dict[int, str]:
     """Offset -> 'Struct.field', but only where the answer is unambiguous.
 
     An offset several structs claim tells the reader nothing and costs tokens to
@@ -99,11 +99,11 @@ def _fields_for(project: "Project", struct_hint: str = "") -> dict[int, str]:
     return out
 
 
-def build(project: "Project", addr: int, budget: PacketBudget | None = None,
+def build(project: Project, addr: int, budget: PacketBudget | None = None,
           form: str = "", divergence: str = "", attempt: int = 1) -> Packet:
     """Assemble one function's packet."""
     from ..adapters.groundtruth.lifted_rexglue import from_project as truth_from_project
-    from .cnorm import has_unresolved_branch, is_usable, normalize, signature_of
+    from .cnorm import has_unresolved_branch, is_usable, normalize
 
     budget = budget or PacketBudget(
         target_tokens=project.get("budget.packet_tokens_target", 1000),
@@ -219,7 +219,7 @@ def _header(fn: dict[str, Any], attempt: int) -> str:
     return "  ".join(bits)
 
 
-def _signature(project: "Project", fn: dict[str, Any], addr: int) -> str:
+def _signature(project: Project, fn: dict[str, Any], addr: int) -> str:
     if fn.get("signature"):
         return fn["signature"]
     source = _decompiled(project, addr)
@@ -240,7 +240,7 @@ def _is_frame_helper(name: str | None) -> bool:
     return bool(name) and name.startswith(FRAME_HELPERS)
 
 
-def _callee_line(project: "Project", addr: int, limit: int) -> str:
+def _callee_line(project: Project, addr: int, limit: int) -> str:
     rows = project.db.query(
         "SELECT callee, callee_name, kind FROM xref WHERE caller=? "
         "ORDER BY kind, site_line LIMIT ?",
@@ -275,7 +275,7 @@ def _callee_line(project: "Project", addr: int, limit: int) -> str:
     return " | ".join(parts)
 
 
-def _constants_line(project: "Project", gt, addr: int, limit: int) -> str:
+def _constants_line(project: Project, gt, addr: int, limit: int) -> str:
     rows = project.db.query(
         "SELECT value, string_preview FROM const_ref WHERE addr=? ORDER BY value LIMIT ?",
         (addr, limit),
@@ -292,7 +292,7 @@ def _constants_line(project: "Project", gt, addr: int, limit: int) -> str:
     return " ".join(out)
 
 
-def _store_census_line(project: "Project", addr: int) -> str:
+def _store_census_line(project: Project, addr: int) -> str:
     row = project.db.one("SELECT store_prov_json FROM gate WHERE addr=?", (addr,))
     if not row or not row.get("store_prov_json"):
         return ""
@@ -310,7 +310,7 @@ def _store_census_line(project: "Project", addr: int) -> str:
     return f"{len(stores)} (" + ", ".join(f"{k}:{v}" for k, v in sorted(by_base.items())) + ")"
 
 
-def _window_hint(project: "Project", addr: int) -> str:
+def _window_hint(project: Project, addr: int) -> str:
     row = project.db.one("SELECT windows_json FROM gate WHERE addr=?", (addr,))
     if not row or not row.get("windows_json"):
         return ""
@@ -328,19 +328,30 @@ def _window_hint(project: "Project", addr: int) -> str:
     if not windows:
         return "none outside the frame"
     parts = []
+    any_deref = False
     for w in windows[:8]:
         base = w.get("base") or "r3"
         off = w.get("offset")
-        deref = "*" if w.get("needs_deref") else ""
-        parts.append(f"{deref}{base}+{off if off is not None else '?'}:{w.get('len')}")
+        chain = w.get("deref") or []
+        if chain:
+            any_deref = True
+            # Spell the derivation out. An implicit "this base needs a read"
+            # invites a window rooted at the entry register instead of at the
+            # pointer it holds, which rewinds the wrong memory entirely.
+            addr = f"[{base}+{chain[0]}]"
+            for step in chain[1:]:
+                addr = f"[{addr}+{step}]"
+        else:
+            addr = base
+        suffix = f"+{off}" if off else ""
+        parts.append(f"{addr}{suffix}:{w.get('len')}")
     tail = f" (+{len(windows) - 8} more)" if len(windows) > 8 else ""
-    hint = "    (* = base must be read before the call)" if any(
-        w.get("needs_deref") for w in windows[:8]
-    ) else ""
+    hint = ("    ([r3+4] means: load a pointer from r3+4, then offset from there)"
+            if any_deref else "")
     return " ".join(parts) + tail + hint
 
 
-def _sibling_line(project: "Project", fn: dict[str, Any], limit: int) -> str:
+def _sibling_line(project: Project, fn: dict[str, Any], limit: int) -> str:
     if not fn.get("family_id"):
         return ""
     rows = project.db.query(
@@ -353,7 +364,7 @@ def _sibling_line(project: "Project", fn: dict[str, Any], limit: int) -> str:
     )
 
 
-def _decompiled(project: "Project", addr: int) -> str:
+def _decompiled(project: Project, addr: int) -> str:
     from pathlib import Path
 
     row = project.db.one(

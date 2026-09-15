@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ..core.config import Project
 
 
-def record(project: "Project", provider_id: str, req: LLMRequest, result: LLMResult,
+def record(project: Project, provider_id: str, req: LLMRequest, result: LLMResult,
            *, run_id: int | None = None, attempt: int = 1,
            packet_tokens_est: int = 0) -> int:
     """Write one llm_call row and refine the token estimator. Returns its id."""
@@ -118,7 +118,7 @@ class CostReport:
         return "\n".join(lines)
 
 
-def report(project: "Project", group_by: str = "") -> CostReport:
+def report(project: Project, group_by: str = "") -> CostReport:
     totals = project.db.one(
         "SELECT COUNT(*) AS calls, "
         "COALESCE(SUM(input_tokens),0) AS input_tokens, "

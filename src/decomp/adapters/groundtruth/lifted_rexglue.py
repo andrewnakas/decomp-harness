@@ -509,10 +509,10 @@ def _make_callee(addr: int | None, name: str, line: int) -> Callee:
 
 # One adapter per project directory. The index is 47k entries; rebuilding or
 # reloading it per call turned packet assembly into a disk-bound loop.
-_ADAPTERS: dict[str, "RexGlueLifted"] = {}
+_ADAPTERS: dict[str, RexGlueLifted] = {}
 
 
-def from_project(project: "Project", reuse: bool = True) -> RexGlueLifted:
+def from_project(project: Project, reuse: bool = True) -> RexGlueLifted:
     """Build the adapter for a project.
 
     The directory actually imported wins over configuration: `decomp import

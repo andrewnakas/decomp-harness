@@ -66,7 +66,7 @@ class CensusRules:
     entry_regs: tuple[str, ...] = ()
 
     @classmethod
-    def load_from(cls, data: dict[str, Any] | None = None) -> "CensusRules":
+    def load_from(cls, data: dict[str, Any] | None = None) -> CensusRules:
         merged = {**DEFAULT_RULES, **(data or {})}
         return cls(
             gate1={k: re.compile(v) for k, v in merged["gate1_patterns"].items()},
@@ -101,6 +101,10 @@ class RexGlueCensus(GateScreener):
 
         lines = body.splitlines()
         assigned: dict[str, int] = {}     # register -> line it was last written
+        # register -> (base register, offset) when it was loaded from memory.
+        # A window whose base was loaded has to say where from, or the oracle
+        # rewinds the wrong address.
+        loaded_from: dict[str, tuple[str, int]] = {}
         loop_ranges = self._loop_ranges(lines)
         gate1_hits: list[str] = []
         gate3_hits: list[str] = []
@@ -119,13 +123,20 @@ class RexGlueCensus(GateScreener):
 
             store = self.rules.store.search(line) if self.rules.store else None
             if store:
-                result.stores.append(
-                    self._classify_store(n, line, store.group(1), assigned, loop_ranges)
-                )
+                site = self._classify_store(n, line, store.group(1), assigned,
+                                            loop_ranges)
+                site.derived_from = loaded_from.get(site.base_ref)
+                result.stores.append(site)
 
-            # Track register writes so a later store base can be called derived.
+            # Track register writes so a later store base can be called derived,
+            # and remember simple loads so the derivation can be reproduced.
+            load = self._simple_load(line)
             for reg in self._assigned_registers(line):
                 assigned[reg] = n
+                if load and load[0] == reg:
+                    loaded_from[reg] = (load[1], load[2])
+                else:
+                    loaded_from.pop(reg, None)
 
         result.census = {
             "lines": len(lines),
@@ -191,18 +202,22 @@ class RexGlueCensus(GateScreener):
             result.reasons = ["no stores; compare result registers instead"]
             return result
 
-        result.suggested_windows = [
-            {
+        result.suggested_windows = []
+        for s in result.stores:
+            window = {
                 "base": s.base_ref or "r3",
                 "offset": s.offset,
                 "len": s.size,
                 "line": s.line,
-                # A derived base has to be read from memory before the call;
-                # the window builder needs to know which ones those are.
                 "needs_deref": s.base == "derived",
             }
-            for s in result.stores
-        ]
+            if s.derived_from:
+                # Say exactly how to reach the base: load from this register at
+                # this offset, then apply the window offset. Leaving it implicit
+                # invites a window rooted at the wrong address.
+                window["base"] = s.derived_from[0]
+                window["deref"] = [s.derived_from[1]]
+            result.suggested_windows.append(window)
         if derived:
             result.reasons.append(
                 f"{len(derived)} window base(s) must be read before the call"
@@ -230,6 +245,18 @@ class RexGlueCensus(GateScreener):
                     if head is not None and head <= n:
                         ranges.append((head, n))
         return ranges
+
+    def _simple_load(self, line: str) -> tuple[str, str, int] | None:
+        """Match `ctx.rD.u64 = REX_LOAD_U32(ctx.rB.u32 + K);` -> (rD, rB, K)."""
+        m = re.search(
+            r"ctx\.(r\d+)\.\w+\s*=\s*REX_(?:MM_)?LOAD_\w+\s*\(\s*"
+            r"ctx\.(r\d+)\.\w+\s*(?:\+\s*(0x[0-9A-Fa-f]+|\d+))?\s*\)",
+            line,
+        )
+        if not m:
+            return None
+        offset = int(m.group(3), 0) if m.group(3) else 0
+        return m.group(1), m.group(2), offset
 
     def _assigned_registers(self, line: str) -> list[str]:
         out = []
@@ -288,7 +315,7 @@ def _within_loop(line_no: int, loop_ranges: list[tuple[int, int]]) -> bool:
     return any(head <= line_no <= tail for head, tail in loop_ranges)
 
 
-def from_project(project: "Project") -> RexGlueCensus:
+def from_project(project: Project) -> RexGlueCensus:
     rules_path = project.get("screen.rules_file")
     data = None
     if rules_path and Path(rules_path).is_file():

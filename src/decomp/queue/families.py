@@ -71,7 +71,7 @@ def minhash(items: set[str], num_hashes: int = NUM_HASHES) -> tuple[int, ...]:
 def jaccard(a: tuple[int, ...], b: tuple[int, ...]) -> float:
     if not a or not b:
         return 0.0
-    return sum(1 for x, y in zip(a, b) if x == y) / len(a)
+    return sum(1 for x, y in zip(a, b, strict=True) if x == y) / len(a)
 
 
 def cluster(bodies: dict[int, str], band_size: int = BAND_SIZE,

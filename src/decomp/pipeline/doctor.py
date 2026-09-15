@@ -110,7 +110,7 @@ def _version(argv: list[str]) -> str:
         return ""
 
 
-def run(project: "Project | None" = None) -> DoctorResult:
+def run(project: Project | None = None) -> DoctorResult:
     import sys
 
     checks: list[Check] = []
@@ -162,11 +162,14 @@ def run(project: "Project | None" = None) -> DoctorResult:
         ))
 
     # --- providers ---------------------------------------------------------
-    for name, login_cmd in (("claude", "claude  (then /login)"), ("codex", "codex login")):
+    for name, login_cmd in (("claude", "run `claude` then /login"),
+                            ("codex", "run `codex login`")):
         exe = shutil.which(name)
         if not exe:
-            checks.append(Check(f"provider:{name}", False, f"not on PATH; install it",
-                                severity="warn"))
+            checks.append(Check(
+                f"provider:{name}", False,
+                f"not on PATH; install it, then {login_cmd}", severity="warn",
+            ))
             continue
         checks.append(Check(f"provider:{name}", True, _version([name, "--version"])))
 

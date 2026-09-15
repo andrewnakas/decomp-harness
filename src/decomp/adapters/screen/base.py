@@ -31,6 +31,8 @@ class StoreSite:
     base_ref: str = ""   # the register or symbol the base came from
     offset: int | None = None
     size: int = 0
+    # When the base was loaded from memory: (register, offset) it came from.
+    derived_from: tuple[str, int] | None = None
 
     @property
     def enumerable(self) -> bool:

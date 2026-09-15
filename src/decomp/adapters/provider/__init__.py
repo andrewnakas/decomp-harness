@@ -23,7 +23,7 @@ __all__ = [
 KNOWN = ("claude", "codex", "replay")
 
 
-def get_provider(project: "Project", name: str | None = None, *,
+def get_provider(project: Project, name: str | None = None, *,
                  record: bool = False) -> Provider:
     """Build a provider from project config. `name` defaults to providers.default."""
     from .claude_cli import ClaudeCliProvider
@@ -59,7 +59,7 @@ def get_provider(project: "Project", name: str | None = None, *,
     raise KeyError(f"unknown provider '{name}' (known: {', '.join(KNOWN)})")
 
 
-def all_providers(project: "Project") -> list[Provider]:
+def all_providers(project: Project) -> list[Provider]:
     out = []
     for name in ("claude", "codex"):
         try:

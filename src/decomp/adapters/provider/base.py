@@ -56,7 +56,7 @@ class LLMRequest:
     tier: str = "mid"                            # small | mid | strong
     model: str = ""                              # explicit override; else resolved from tier
     effort: str = ""                             # low | medium | high
-    max_turns: int = 1
+    max_turns: int = 4
     cwd: Path | None = None                      # isolated work dir
     resume_session: str = ""                     # provider session id for diff-only retries
     allowed_tools: list[str] = field(default_factory=list)

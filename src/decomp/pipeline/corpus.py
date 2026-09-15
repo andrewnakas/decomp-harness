@@ -71,7 +71,7 @@ class CorpusResult:
         return "\n".join(lines)
 
 
-def load_callgraph(project: "Project", rebuild: bool = False) -> CallGraph:
+def load_callgraph(project: Project, rebuild: bool = False) -> CallGraph:
     """Build the call graph, from the database if populated, else from the corpus."""
     graph = CallGraph()
     rows = project.db.query("SELECT caller, callee, kind FROM xref WHERE callee != 0")
@@ -97,7 +97,7 @@ def load_callgraph(project: "Project", rebuild: bool = False) -> CallGraph:
     return graph
 
 
-def resolve_seeds(project: "Project", seeds: list[str] | None,
+def resolve_seeds(project: Project, seeds: list[str] | None,
                   seed_file: Path | str | None = None,
                   subsystem: str | None = None) -> list[int]:
     """Seeds may be addresses, a file of addresses, or a named subsystem."""
@@ -133,7 +133,7 @@ def resolve_seeds(project: "Project", seeds: list[str] | None,
         kw.get("subsystem"), kw.get("max_depth"), kw.get("stop_kinds"),
     ],
 )
-def grow(project: "Project", ctx, seeds: list[str] | None = None,
+def grow(project: Project, ctx, seeds: list[str] | None = None,
          seed_file: Path | str | None = None, subsystem: str = "",
          max_depth: int = 0, stop_kinds: tuple[str, ...] = DEFAULT_STOP_KINDS,
          reset: bool = True) -> CorpusResult:

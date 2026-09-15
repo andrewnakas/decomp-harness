@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -32,7 +32,7 @@ app.add_typer(queue_app, name="queue")
 app.add_typer(llm_app, name="llm")
 app.add_typer(lesson_app, name="lesson")
 
-ProjectOpt = Annotated[Optional[Path], typer.Option("--project", "-C", help="Project directory")]
+ProjectOpt = Annotated[Path | None, typer.Option("--project", "-C", help="Project directory")]
 JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable output")]
 
 
@@ -64,8 +64,8 @@ def init(
 @app.command()
 def doctor(project: ProjectOpt = None, json_out: JsonOpt = False):
     """Check tools, providers, hosts, and the lessons' guards."""
-    from ..pipeline.doctor import run as run_doctor
     from ..core.config import find_project_root
+    from ..pipeline.doctor import run as run_doctor
 
     out.set_json(json_out)
     proj = None
@@ -158,9 +158,10 @@ def llm_ping(
 def cost(
     by: Annotated[str, typer.Option(help="Group by: model | purpose | provider")] = "",
     baseline_from: Annotated[
-        list[str], typer.Option("--baseline-from", help="Project path whose Claude Code "
-                                "transcripts form the manual baseline (repeatable)")
-    ] = [],
+        list[str] | None, typer.Option("--baseline-from", help="Project path whose "
+                                          "Claude Code transcripts form the manual "
+                                          "baseline (repeatable)")
+    ] = None,
     baseline_verified: Annotated[
         int, typer.Option(help="Functions the baseline sessions verified")
     ] = 0,
@@ -394,7 +395,7 @@ def import_decomp_cmd(
 @corpus_app.command("grow")
 def corpus_grow(
     seeds: Annotated[list[str], typer.Argument(help="Seed addresses")] = None,
-    seed_file: Annotated[Optional[Path], typer.Option("--seed-file", help="File of addresses")] = None,
+    seed_file: Annotated[Path | None, typer.Option("--seed-file", help="File of addresses")] = None,
     subsystem: Annotated[str, typer.Option(help="Name this corpus")] = "",
     max_depth: Annotated[int, typer.Option(help="0 = unbounded")] = 0,
     follow_helpers: Annotated[bool, typer.Option(help="Walk into runtime helpers too")] = False,
@@ -488,6 +489,74 @@ def queue_set(
     except ValueError as exc:
         out.fail(str(exc))
     out.emit(f"{addr_str(a)}\t{row.get('tier')}\t{row.get('status')}")
+
+
+# ---------------------------------------------------------------------- port
+@app.command()
+def packet(
+    addr: Annotated[str, typer.Argument(help="Function address")],
+    form: Annotated[str, typer.Option(help="c | asm | both")] = "",
+    show: Annotated[bool, typer.Option(help="Print the packet itself")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Build one packet and report what it costs."""
+    from ..core.db import parse_addr
+    from ..views.packet import build as build_packet
+
+    out.set_json(json_out)
+    pk = build_packet(_open(project), parse_addr(addr), form=form)
+    out.emit(pk.text if show and not json_out else pk)
+
+
+@app.command()
+def port(
+    addrs: Annotated[list[str] | None, typer.Argument(help="Addresses to port")] = None,
+    next_n: Annotated[int, typer.Option("--next", help="Take the next N from the queue")] = 0,
+    tier: Annotated[str, typer.Option(help="Restrict the queue pick to a tier")] = "",
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    provider: Annotated[str, typer.Option(help="claude | codex | replay")] = "",
+    model: Annotated[str, typer.Option(help="Explicit model override")] = "",
+    model_tier: Annotated[str, typer.Option("--tier-override", help="small | mid | strong")] = "",
+    out_dir: Annotated[Path | None, typer.Option("--out", help="Where to write ports")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Build packets, make no calls")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Ask a model for ports, check them, and record what happened.
+
+    This is the only command that spends tokens.
+    """
+    from ..core.db import parse_addr
+    from ..pipeline.port import port_many
+    from ..pipeline.queue import next_items
+
+    out.set_json(json_out)
+    proj = _open(project)
+
+    targets: list[int] = [parse_addr(a) for a in (addrs or [])]
+    if next_n:
+        picks = next_items(proj, tier=tier, limit=next_n, subsystem=subsystem)
+        targets.extend(i.addr for i in picks.items)
+    if not targets:
+        out.fail("nothing to port: pass addresses or --next N")
+
+    out.emit(port_many(proj, targets, provider_name=provider or None, model=model,
+                       tier=model_tier, out_dir=out_dir, dry_run=dry_run))
+
+
+@app.command()
+def brief(
+    show: Annotated[bool, typer.Option(help="Print the prefix itself")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """The stable prefix every call rides on."""
+    from ..llm.prefix import build as build_prefix
+
+    out.set_json(json_out)
+    proj = _open(project)
+    pf = build_prefix(proj)
+    path = proj.state / "brief.md"
+    path.write_text(pf.text)
+    out.emit(pf.text if show and not json_out else pf)
 
 
 def main() -> None:
