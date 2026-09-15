@@ -122,6 +122,18 @@ class Project:
     def prefix_dir(self) -> Path:
         return self.sub("prefix")
 
+    @property
+    def ghidra_dir(self) -> Path:
+        """Where the analysis engine keeps its project.
+
+        Not under `.decomp`: Ghidra refuses any path element starting with a
+        dot. Being a visible directory is no loss - it is a real Ghidra project,
+        and opening it in the GUI to look at something by hand is useful.
+        """
+        p = self.root / "ghidra"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
     # ----------------------------------------------------------------- config
     def get(self, path: str, default: Any = None) -> Any:
         """Dotted lookup: project.get('routing.small')."""

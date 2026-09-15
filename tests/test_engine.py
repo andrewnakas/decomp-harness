@@ -123,3 +123,22 @@ def test_analyze_stage_end_to_end(project, request, tmp_path, engine):
     packet = build_packet(project, 0x82000000)
     assert packet.tokens > 0
     assert "get_count" in packet.text or "param_1" in packet.text
+
+
+def test_the_engine_project_is_not_under_a_dot_directory(project):
+    """Ghidra refuses any path element starting with a dot, so the engine's
+    project cannot live under .decomp. This failed only when analyze was first
+    run against a real image."""
+    path = project.ghidra_dir
+    assert path.is_dir()
+    assert not any(part.startswith(".") for part in path.parts[1:]), path
+    assert ".decomp" not in str(path)
+
+
+def test_init_ignores_the_generated_directories(tmp_path):
+    from decomp.pipeline.init_project import init
+
+    init(tmp_path, target="xex")
+    ignored = (tmp_path / ".gitignore").read_text()
+    for entry in (".decomp/", "ghidra/", "out/"):
+        assert entry in ignored

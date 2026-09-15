@@ -106,6 +106,14 @@ def init(root: Path | str = ".", target: str = "rawimage", name: str = "",
         )
         created = True
     (root / STATE_DIR).mkdir(exist_ok=True)
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(
+            "# decomp state and generated analysis\n"
+            f"{STATE_DIR}/\n"
+            "ghidra/\n"
+            "out/\n"
+        )
     project = open_project(root)
     seeded = lessons.seed(project)
     return InitResult(root=root, created=created, lessons_seeded=seeded)

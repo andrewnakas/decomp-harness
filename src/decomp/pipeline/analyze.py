@@ -101,7 +101,7 @@ def run(project: Project, ctx, subsystem: str = "", scope: str = "corpus",
             target["image_path"],
             int(target.get("base_addr") or 0),
             target.get("ghidra_lang") or project.get("target.ghidra_lang", ""),
-            str(project.sub("ghidra")),
+            str(project.ghidra_dir),
             analyze=False,
         )
         result.engine = info.brief()
