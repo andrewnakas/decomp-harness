@@ -70,17 +70,35 @@ makes the harness more expensive is visible.
 
 Ranked by what they actually remove, measured on a real corpus:
 
-| Technique | Effect |
+| Technique | Measured effect |
 |---|---|
 | No file access; packets only | Removes repo discovery entirely |
-| Mechanical screening before any call | 1,692 functions to 612 worth attempting |
+| Mechanical screening before any call | 1,692 functions down to 612 worth attempting |
 | Mechanical drafts | 82 of those 612 need no model at all |
-| Stable cached prefix | A first call cost $0.0278, the identical second cost $0.0034 |
+| Stable cached prefix | A first call cost $0.0278, the identical second $0.0034 |
+| Effort matched to the tier | Output on one real port fell from ~22,000 to 14,494 |
 | Normalized views | 10.6% smaller, and far denser in meaning |
 | Diff-only retries | A retry re-sends the correction, not the packet |
 | Structured output | No prose, no scaffolding, notes capped at 300 characters |
 | Persisted knowledge | Traps become checks instead of paragraphs re-read each session |
 
-The normalization number is deliberately unflattering. Its value is not size: it
-is that `+0x150` becomes `Player.decoder` where that is established, and stays
-`+0x150` where it is not.
+Two of those numbers are deliberately unflattering. Normalization is worth
+keeping for density rather than size: `+0x150` becomes `Player.decoder` where
+that is established and stays `+0x150` where it is not. And matching effort to
+the tier gave 1.2x on output, not the larger figure hoped for, which is what the
+ledger says and so what this claims.
+
+## Counting tokens honestly
+
+A cached read costs about a tenth of a fresh one and output costs several times
+more, so adding the four kinds together and calling the sum "tokens" is
+misleading. Measured on the manual sessions this replaces, the raw sum was 485
+million against a cost-weighted 60 million: a factor of eight, in the direction
+that flatters whatever it is compared against.
+
+So `decomp cost` weights each kind by what it costs and compares on that. The
+baseline over the audio work is about 454,000 weighted tokens per verified
+function, and it carries a caveat in the output, because it counts everything
+those sessions did rather than only the work being compared. Widening the scan
+from one project directory to two moved that figure by six times, which is
+exactly why the caveat is printed rather than left to the reader.

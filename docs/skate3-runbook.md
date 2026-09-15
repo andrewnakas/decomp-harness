@@ -120,8 +120,22 @@ round 1
 
 ```sh
 decomp cost --by model
-decomp cost --baseline-from ~/Documents/sk8AudioDecompile --baseline-verified 138
+decomp cost --baseline-from ~/Documents/sk8AudioDecompile \
+            --baseline-from ~/skate3 \
+            --baseline-verified 138 --since 2026-09-08
 ```
 
 The baseline is reconstructed from the Claude Code transcripts of the manual
-work, so the comparison is against what this actually replaces.
+work, so the comparison is against what this actually replaces. Narrow it with
+`--since`: without a date the scan picks up the recompilation sessions as well,
+and attributing those to 138 verified audio functions inflates the figure six
+times over.
+
+Measured over the audio window: about 454,000 cost-weighted tokens per verified
+function. Cost-weighted means a cached read counted at a tenth of a fresh one
+and output at five times, because summing the four kinds raw overstates a
+cache-heavy session by a factor of eight.
+
+Before quoting any comparison, check what the baseline sessions were actually
+doing. They decoded three container formats and wrote a Rust port as well as
+porting functions, and none of that is work this harness performs.
