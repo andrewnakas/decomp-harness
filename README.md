@@ -85,6 +85,7 @@ work, so the comparison is against what this replaces.
 ## Documentation
 
 - [Design](docs/design.md) — the shape and the reasoning
+- [Providers](docs/providers.md) — Claude, Codex, and replay
 - [Adapters](docs/adapters.md) — how to target something else
 - [Data model](docs/data-model.md) — evidence, states, the ledger
 - [Skate 3 runbook](docs/skate3-runbook.md) — the real sequence, with real numbers

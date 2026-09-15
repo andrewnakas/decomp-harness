@@ -88,7 +88,14 @@ def check(answer: PortAnswer, expected_addr: int | None = None,
 
     code = answer.code or ""
     if not code.strip():
-        issues.append(LintIssue("code", "empty body"))
+        # Strict structured output requires every field to be present, so a
+        # model with nothing to say fills this with an empty string rather than
+        # omitting it. That is not an answer.
+        issues.append(LintIssue(
+            "code",
+            "the body is empty; if the function cannot be ported, set `blocked` "
+            "with the reason instead of returning nothing",
+        ))
 
     if RE_SCAFFOLDING.search(code):
         issues.append(LintIssue(

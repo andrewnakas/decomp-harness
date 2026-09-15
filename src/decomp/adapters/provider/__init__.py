@@ -48,6 +48,7 @@ def get_provider(project: Project, name: str | None = None, *,
             bin_path=cfg.get("bin", "codex"),
             routing=cfg.get("models", {}),
             prices=cfg.get("prices", {}),
+            inherit_mcp=bool(cfg.get("inherit_mcp", False)),
         )
     if name == "replay":
         cfg = project.get("providers.replay", {}) or {}

@@ -25,14 +25,66 @@ DEFAULT_PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+def strict_schema(schema: Any) -> Any:
+    """Rewrite a JSON Schema into the strict form OpenAI requires.
+
+    Two rules that Pydantic's output does not satisfy on its own, and that the
+    API rejects outright rather than ignoring:
+
+      * every object must say `additionalProperties: false`
+      * every property must appear in `required`
+
+    Optional fields therefore cannot simply be left out of `required`. They are
+    made nullable instead, which keeps the same meaning: the field is always
+    present and may be null. The harness treats null and absent alike.
+    """
+    if isinstance(schema, list):
+        return [strict_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    out = {key: strict_schema(value) for key, value in schema.items()}
+
+    if out.get("type") == "object" or "properties" in out:
+        out["additionalProperties"] = False
+        properties = out.get("properties") or {}
+        if properties:
+            optional = [
+                name for name in properties
+                if name not in (out.get("required") or [])
+            ]
+            for name in optional:
+                properties[name] = _nullable(properties[name])
+            out["required"] = list(properties)
+    return out
+
+
+def _nullable(prop: Any) -> Any:
+    """Allow null, so a field can be optional while still being required."""
+    if not isinstance(prop, dict):
+        return prop
+    if "anyOf" in prop:
+        variants = prop["anyOf"]
+        if not any(v.get("type") == "null" for v in variants if isinstance(v, dict)):
+            prop["anyOf"] = [*variants, {"type": "null"}]
+        return prop
+    kind = prop.get("type")
+    if isinstance(kind, str) and kind != "null":
+        prop["type"] = [kind, "null"]
+    elif isinstance(kind, list) and "null" not in kind:
+        prop["type"] = [*kind, "null"]
+    return prop
+
+
 class CodexCliProvider(Provider):
     id = "codex"
 
     def __init__(self, bin_path: str = "codex", routing: dict[str, str] | None = None,
-                 prices: dict[str, Any] | None = None):
+                 prices: dict[str, Any] | None = None, inherit_mcp: bool = False):
         self.bin = bin_path
         self.routing = routing or {}
         self.prices = prices or {}
+        self.inherit_mcp = inherit_mcp
 
     # ------------------------------------------------------------- health
     def health(self) -> ProviderHealth:
@@ -71,8 +123,30 @@ class CodexCliProvider(Provider):
         argv += ["-o", str(out_file)]
         # Read-only sandbox: the model has no reason to touch the filesystem.
         argv += ["--sandbox", "read-only"]
+        # Do not inherit the user's MCP servers. They are irrelevant to a port,
+        # they cost tool-definition tokens on every call, and one that is
+        # configured but not running makes every call wait on a dead socket.
+        # This is the same reasoning as --strict-mcp-config on the other side.
+        if not self.inherit_mcp:
+            argv += ["-c", "mcp_servers={}"]
         if req.cwd:
             argv += ["-C", str(req.cwd)]
+        return argv
+
+    def build_resume_argv(self, req: LLMRequest, schema_file: Path | None,
+                          out_file: Path) -> list[str]:
+        """Continue an existing session.
+
+        `resume` accepts a narrower set of flags than `exec`: the sandbox and
+        the working directory were settled by the first call and are not
+        repeatable here. Passing them anyway makes the CLI read the prompt as a
+        flag argument and fail.
+        """
+        argv = [self.bin, "exec", "resume", req.resume_session, "--json",
+                "--skip-git-repo-check"]
+        if schema_file is not None:
+            argv += ["--output-schema", str(schema_file)]
+        argv += ["-o", str(out_file)]
         return argv
 
     def call(self, req: LLMRequest) -> LLMResult:
@@ -85,15 +159,16 @@ class CodexCliProvider(Provider):
         schema_file = None
         if req.schema:
             schema_file = workdir / "schema.json"
-            schema_file.write_text(json.dumps(req.schema))
+            # OpenAI rejects a schema that is not strict, rather than ignoring
+            # the parts it does not use, so it is converted rather than passed
+            # through as Claude's is.
+            schema_file.write_text(json.dumps(strict_schema(req.schema)))
         out_file = workdir / "codex_answer.txt"
 
-        argv = self.build_argv(req, schema_file, out_file)
         if req.resume_session:
-            argv = [self.bin, "exec", "resume", req.resume_session, "--json"]
-            if schema_file is not None:
-                argv += ["--output-schema", str(schema_file)]
-            argv += ["-o", str(out_file)]
+            argv = self.build_resume_argv(req, schema_file, out_file)
+        else:
+            argv = self.build_argv(req, schema_file, out_file)
         argv.append(req.prompt)
 
         raw_path = workdir / "codex_raw.jsonl"
@@ -113,6 +188,13 @@ class CodexCliProvider(Provider):
         raw_path.write_text(proc.stdout)
         final_text = out_file.read_text() if out_file.is_file() else ""
         result = parse_codex_jsonl(proc.stdout, final_text)
+
+        # The event stream can come back empty while the answer file is written,
+        # and an answer on disk is an answer. Without this the call was scored a
+        # failure and retried, paying twice for a result already in hand.
+        if not result.ok and result.structured is not None and proc.returncode == 0:
+            result.ok = True
+            result.error = ""
         result.duration_ms = duration_ms
         result.raw_path = raw_path
         result.model = result.model or req.model or self.resolve_model(req.tier)
@@ -155,10 +237,17 @@ def parse_codex_jsonl(stdout: str, final_text: str = "") -> LLMResult:
         elif etype == "turn.completed":
             result.ok = True
             usage = evt.get("usage") or {}
+            fresh = int(usage.get("input_tokens", 0) or 0)
+            cached = int(usage.get("cached_input_tokens", 0) or 0)
             result.usage = Usage(
-                input_tokens=int(usage.get("input_tokens", 0) or 0),
-                cache_read_tokens=int(usage.get("cached_input_tokens", 0) or 0),
-                output_tokens=int(usage.get("output_tokens", 0) or 0),
+                # Codex reports input_tokens inclusive of the cached ones, where
+                # Claude reports them separately. Subtracting keeps the ledger
+                # comparable across providers, which is the whole point of it.
+                input_tokens=max(0, fresh - cached),
+                cache_read_tokens=cached,
+                cache_write_tokens=int(usage.get("cache_write_input_tokens", 0) or 0),
+                output_tokens=int(usage.get("output_tokens", 0) or 0)
+                + int(usage.get("reasoning_output_tokens", 0) or 0),
             )
         elif etype in ("turn.failed", "error"):
             result.ok = False
