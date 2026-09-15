@@ -15,7 +15,7 @@ def gt(fixtures, tmp_path):
 
 def test_index_finds_every_function_with_bounds(gt):
     index = gt.index()
-    assert set(index) == {0x82B10000, 0x82B10100, 0x82B10200}
+    assert set(index) == {0x82B10000, 0x82B10100, 0x82B10200, 0x82B10300}
     first = index[0x82B10000]
     assert first.lines > 10
     assert index[0x82B10100].vec == 3       # lvx128, vmaddfp128, stvx128
@@ -92,7 +92,8 @@ def test_index_is_cached_by_corpus_signature(gt, tmp_path):
 
     reopened = RexGlueLifted(gt.dir, cache_path=gt.cache_path)
     reopened.build_index = lambda: (_ for _ in ()).throw(AssertionError("rebuilt"))
-    assert set(reopened.index()) == {0x82B10000, 0x82B10100, 0x82B10200}
+    assert set(reopened.index()) == {0x82B10000, 0x82B10100, 0x82B10200,
+                                     0x82B10300}
 
 
 def test_missing_function_is_empty_not_an_error(gt):

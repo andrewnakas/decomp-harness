@@ -53,3 +53,13 @@ DEFINE_REX_FUNC(sub_82B10200) {
 	// blr
 	return;
 }
+
+DEFINE_REX_FUNC(sub_82B10300) {
+	REX_FUNC_PROLOGUE();
+	// lwz r11,0(r3)
+	ctx.r11.u64 = REX_LOAD_U32(ctx.r3.u32 + 0);
+	// stw r11,24(r4)
+	REX_STORE_U32(ctx.r4.u32 + 24, ctx.r11.u32);
+	// blr
+	return;
+}

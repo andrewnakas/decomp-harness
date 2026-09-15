@@ -92,10 +92,67 @@ class PortRunResult:
         return "\n".join(lines)
 
 
+def try_draft(project: Project, addr: int, fn: dict,
+              out_dir: Path) -> PortOutcome | None:
+    """Translate mechanically if the function is simple enough.
+
+    The cheapest token is the one never spent. Roughly one ungated function in
+    eight is a thunk, getter or setter whose translation needs no judgment. The
+    drafter refuses rather than guesses, so declining costs nothing.
+    """
+    from ..adapters.draft.lifted_to_native import LiftedToNative
+    from ..adapters.groundtruth.lifted_rexglue import from_project as truth_from_project
+    from ..llm.schemas import PortAnswer
+
+    try:
+        gt = truth_from_project(project)
+    except KeyError:
+        return None
+
+    result = LiftedToNative().draft(
+        addr, gt.body(addr),
+        {"gate": fn.get("gate"), "has_vmx": bool(fn.get("vmx128"))},
+    )
+    if not hasattr(result, "code"):
+        return None
+
+    answer = PortAnswer(
+        addr=f"{addr:08X}", code=result.code, windows=result.windows,
+        result_registers=result.result_registers, note=result.note,
+        confidence=result.confidence,
+    )
+    report = lint.check(
+        answer, expected_addr=addr,
+        budget_bytes=project.get("oracle.window_budget_bytes", 32768),
+        budget_spans=project.get("oracle.window_budget_spans", 32),
+    )
+    if not report.ok:
+        # A mechanical draft that fails its own lint is a bug in the drafter,
+        # not a reason to ship it and let a session find out.
+        return None
+
+    artifact = emit.write(
+        answer, addr, out_dir,
+        macro=project.get("oracle.port_macro", "SKATE3_PORT"),
+        status="written", provenance="mechanical translation, no model call",
+    )
+    _record(project, addr, answer, status="written", path=artifact.path, attempts=0)
+    project.db.execute("UPDATE port SET source='mechanical' WHERE addr=?", (addr,))
+    return PortOutcome(
+        addr=addr, ok=True, status="written", attempts=0, tokens=0, cost_usd=0.0,
+        path=artifact.path, note=result.note, model="mechanical",
+    )
+
+
 def port_one(project: Project, addr: int, provider_name: str = "",
              model: str = "", tier: str = "", out_dir: Path | None = None,
-             max_attempts: int = MAX_ATTEMPTS, dry_run: bool = False) -> PortOutcome:
-    """Ask for one port, check it, and record what happened."""
+             max_attempts: int = MAX_ATTEMPTS, dry_run: bool = False,
+             allow_draft: bool = True) -> PortOutcome:
+    """Ask for one port, check it, and record what happened.
+
+    A mechanical translation is tried first: if the function needs no judgment,
+    no model is called and the port costs nothing.
+    """
     from ..adapters.provider import LLMRequest, get_provider
     from ..llm import prefix as prefix_mod
     from ..queue import difficulty as difficulty_mod
@@ -110,6 +167,11 @@ def port_one(project: Project, addr: int, provider_name: str = "",
     schema = json_schema(PortAnswer)
     work_dir = project.work_dir / addr_str(addr)
     out_dir = Path(out_dir) if out_dir else project.sub("ports")
+
+    if allow_draft and not dry_run:
+        drafted = try_draft(project, addr, fn, out_dir)
+        if drafted is not None:
+            return drafted
 
     resolved_tier = tier or difficulty_mod.tier_for(
         fn.get("difficulty") or 0.5, bool(fn.get("vmx128")), fn.get("attempts") or 0

@@ -538,11 +538,13 @@ def port(
     model_tier: Annotated[str, typer.Option("--tier-override", help="small | mid | strong")] = "",
     out_dir: Annotated[Path | None, typer.Option("--out", help="Where to write ports")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Build packets, make no calls")] = False,
+    no_draft: Annotated[bool, typer.Option("--no-draft",
+                        help="Skip mechanical translation and always call a model")] = False,
     project: ProjectOpt = None, json_out: JsonOpt = False,
 ):
     """Ask a model for ports, check them, and record what happened.
 
-    This is the only command that spends tokens.
+    A mechanical translation is tried first, so simple functions cost nothing.
     """
     from ..core.db import parse_addr
     from ..pipeline.port import port_many
@@ -559,7 +561,8 @@ def port(
         out.fail("nothing to port: pass addresses or --next N")
 
     out.emit(port_many(proj, targets, provider_name=provider or None, model=model,
-                       tier=model_tier, out_dir=out_dir, dry_run=dry_run))
+                       tier=model_tier, out_dir=out_dir, dry_run=dry_run,
+                       allow_draft=not no_draft))
 
 
 @app.command()

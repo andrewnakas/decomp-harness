@@ -14,7 +14,7 @@ from decomp.pipeline.importer import (
 # ------------------------------------------------------------------ lifted
 def test_import_lifted_populates_functions_and_symbols(project, fixtures):
     res = import_lifted(project, path=fixtures / "lifted")
-    assert res.counts["functions"] == 3
+    assert res.counts["functions"] == 4
 
     row = project.db.one("SELECT * FROM function WHERE addr=?", (0x82B10100,))
     assert row["vmx128"] == 1
@@ -40,7 +40,8 @@ def test_import_lifted_is_idempotent(project, fixtures):
     import_lifted(project, path=fixtures / "lifted")
     again = import_lifted(project, path=fixtures / "lifted")
     assert isinstance(again, StageSkipped)
-    assert project.db.scalar("SELECT COUNT(*) FROM function") == 5  # 3 + helper + import
+    # four functions, plus the helper and the import learned from call sites
+    assert project.db.scalar("SELECT COUNT(*) FROM function") == 6
 
 
 def test_import_xrefs_records_edges_and_constants(project, fixtures):
