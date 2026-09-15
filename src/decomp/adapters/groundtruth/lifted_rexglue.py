@@ -507,7 +507,12 @@ def _make_callee(addr: int | None, name: str, line: int) -> Callee:
     return Callee(addr, name, "direct", line)
 
 
-def from_project(project: "Project") -> RexGlueLifted:
+# One adapter per project directory. The index is 47k entries; rebuilding or
+# reloading it per call turned packet assembly into a disk-bound loop.
+_ADAPTERS: dict[str, "RexGlueLifted"] = {}
+
+
+def from_project(project: "Project", reuse: bool = True) -> RexGlueLifted:
     """Build the adapter for a project.
 
     The directory actually imported wins over configuration: `decomp import
@@ -534,8 +539,15 @@ def from_project(project: "Project") -> RexGlueLifted:
         or project.get("truth.pattern")
         or "*_recomp.*.cpp"
     )
-    return RexGlueLifted(
+    key = f"{project.root}|{generated}|{pattern}"
+    if reuse and key in _ADAPTERS:
+        return _ADAPTERS[key]
+
+    adapter = RexGlueLifted(
         generated,
         pattern=pattern,
         cache_path=project.state / "cache" / "lifted_index.json",
     )
+    if reuse:
+        _ADAPTERS[key] = adapter
+    return adapter

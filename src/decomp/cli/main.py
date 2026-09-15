@@ -377,6 +377,19 @@ def import_notes_cmd(
     out.emit(import_notes(_open(project), path=path, force=force))
 
 
+@import_app.command("decomp")
+def import_decomp_cmd(
+    path: Annotated[Path, typer.Argument(help="Directory of sub_*.c decompiler output")],
+    pattern: Annotated[str, typer.Option(help="File glob")] = "sub_*.c",
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Register existing decompiler output as each function's C view."""
+    from ..pipeline.importer import import_decompiled
+
+    out.set_json(json_out)
+    out.emit(import_decompiled(_open(project), path=path, pattern=pattern, force=force))
+
+
 # -------------------------------------------------------------------- corpus
 @corpus_app.command("grow")
 def corpus_grow(

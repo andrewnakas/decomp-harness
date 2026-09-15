@@ -538,6 +538,66 @@ def _summarize_note(text: str) -> str:
     return " ".join(out)[:300]
 
 
+# ------------------------------------------------------- decompiler output
+@stage("import.decomp", inputs=lambda p, **kw: [str(kw.get("path")), _dir_sig(kw.get("path"))])
+def import_decompiled(project: "Project", ctx, path: Path | str,
+                      pattern: str = "sub_*.c") -> ImportResult:
+    """Register existing decompiler output as the C view for each function.
+
+    The files stay where they are; the harness records where to find them and
+    what they cost, so a packet can pick the cheaper body form without reading
+    both.
+    """
+    from ..core.tokens import estimate
+    from ..views.cnorm import has_unresolved_branch, is_usable, normalize, signature_of
+
+    path = Path(path)
+    files = sorted(path.glob(pattern)) if path.is_dir() else []
+    if not files:
+        raise FileNotFoundError(f"no files matching {pattern} under {path}")
+
+    registered = failed = branchy = 0
+    with project.db.tx():
+        for f in files:
+            try:
+                addr = parse_addr(f.stem)
+            except ValueError:
+                continue
+            source = f.read_text(errors="replace")
+            usable = is_usable(source)
+            if not usable:
+                failed += 1
+            if has_unresolved_branch(source):
+                branchy += 1
+            view = normalize(source)
+            project.db.upsert(
+                "view_cache",
+                {
+                    "addr": addr, "kind": "ghidra_c", "path": str(f),
+                    "tokens": estimate(source), "lines": source.count("\n") + 1,
+                    "version_hash": _file_sig(f),
+                },
+                ("addr", "kind"),
+            )
+            update = {
+                "addr": addr,
+                "ghidra_lines": view.text.count("\n") + 1,
+                "decompile_ok": 1 if usable else 0,
+            }
+            sig = signature_of(source)
+            if sig:
+                update["signature"] = sig[:200]
+            project.db.upsert("function", update, "addr")
+            registered += 1
+
+    ctx.record(registered=registered, failed=failed)
+    return ImportResult(
+        "decomp",
+        {"functions": registered, "not_recovered": failed, "unnamed_branch": branchy},
+        [f"{failed} need the authoritative assembly instead"] if failed else [],
+    )
+
+
 # ----------------------------------------------------------------- utils
 def _parse_int(value: Any, default: int = 0) -> int:
     if isinstance(value, int):
