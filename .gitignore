@@ -7,3 +7,6 @@ build/
 .pytest_cache/
 .ruff_cache/
 .decomp/
+
+# macOS
+.DS_Store
