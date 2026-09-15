@@ -1,0 +1,40 @@
+[project]
+name = "decomp-harness"
+version = "0.1.0"
+description = "Token-efficient mechanical harness for AI-driven decompilation and reverse engineering"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "typer>=0.15",
+    "pydantic>=2.9",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+ghidra = ["pyghidra>=3.1"]
+graph = ["igraph>=0.11"]
+mcp = ["mcp>=1.2"]
+dev = ["pytest>=8", "ruff>=0.9"]
+
+[project.scripts]
+decomp = "decomp.cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/decomp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

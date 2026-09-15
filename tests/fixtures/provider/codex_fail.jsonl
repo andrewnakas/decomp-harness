@@ -1,0 +1,2 @@
+{"type":"thread.started","thread_id":"th_bad"}
+{"type":"turn.failed","error":{"message":"model refused"}}
