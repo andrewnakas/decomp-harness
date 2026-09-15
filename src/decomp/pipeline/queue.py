@@ -20,10 +20,21 @@ from ..queue import tiers as tiers_mod
 if TYPE_CHECKING:
     from ..core.config import Project
 
-# Statuses that mean "do not hand this to a model again".
-SETTLED = ("verified", "promoted", "thin", "partial", "needs_human",
+# Work is in one of three states, and only the first is something to pick up.
+#
+# The distinction matters: a written port is finished as far as authoring goes
+# and is waiting on a build and a session. Treating it as open made `queue next`
+# hand back the same functions round after round, and `port --next` re-author
+# work it had already done.
+NEEDS_WORK = ("pending", "drafted", "divergent")
+IN_FLIGHT = ("written", "armed")
+SETTLED = ("verified", "promoted", "thin", "partial", "needs_human", "uncalled",
            "gate1", "gate2", "gate3", "gate4")
-OPEN = ("pending", "drafted", "written", "armed", "divergent", "uncalled")
+
+ALL_STATUSES = (*NEEDS_WORK, *IN_FLIGHT, *SETTLED)
+
+# A divergent port earns another attempt, but not forever.
+MAX_ATTEMPTS = 3
 
 
 @dataclass
@@ -89,7 +100,7 @@ class QueueListResult:
         header = ("addr", "tier", "status", "diff", "hot", "lines", "fam",
                   "vec", "model", "batch", "name")
         return table([i.row() for i in self.items], header) + \
-            f"\n{len(self.items)} of {self.total_open} open"
+            f"\n{len(self.items)} of {self.total_open} to do"
 
 
 # ------------------------------------------------------------------- build
@@ -218,9 +229,15 @@ def next_items(project: Project, tier: str = "", limit: int = 16,
         sql.append("AND f.status=?")
         params.append(status)
     else:
-        placeholders = ",".join("?" for _ in OPEN)
+        placeholders = ",".join("?" for _ in NEEDS_WORK)
         sql.append(f"AND COALESCE(f.status,'pending') IN ({placeholders})")
-        params.extend(OPEN)
+        params.extend(NEEDS_WORK)
+        # A port that diverged is worth another look, but three failed attempts
+        # is a signal to stop rather than a reason to keep paying.
+        sql.append(
+            "AND NOT (COALESCE(f.status,'pending')='divergent' "
+            f"AND COALESCE(f.attempts,0) >= {MAX_ATTEMPTS})"
+        )
     if not include_gated:
         sql.append("AND f.gate IS NULL")
 
@@ -292,11 +309,17 @@ def report(project: Project, subsystem: str = "") -> QueueReport:
     )
     rows.sort(key=lambda r: (tiers_mod.sort_key(r["tier"] or ""), r["status"]))
 
-    settled = sum(r["n"] for r in rows if r["status"] in SETTLED)
     total = sum(r["n"] for r in rows)
+    settled = sum(r["n"] for r in rows if r["status"] in SETTLED)
+    in_flight = sum(r["n"] for r in rows if r["status"] in IN_FLIGHT)
     return QueueReport(
         by_tier_status=[(r["tier"] or "?", r["status"], r["n"]) for r in rows],
-        totals={"total": total, "settled": settled, "open": total - settled},
+        totals={
+            "total": total,
+            "to do": total - settled - in_flight,
+            "awaiting a session": in_flight,
+            "settled": settled,
+        },
     )
 
 
@@ -308,7 +331,7 @@ def set_status(project: Project, addr: int, **fields: Any) -> dict:
     update = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not update:
         raise ValueError(f"nothing to set; allowed fields: {', '.join(sorted(allowed))}")
-    if "status" in update and update["status"] not in (*SETTLED, *OPEN):
+    if "status" in update and update["status"] not in ALL_STATUSES:
         raise ValueError(f"unknown status '{update['status']}'")
     update["addr"] = addr
     update["updated_at"] = now_iso()

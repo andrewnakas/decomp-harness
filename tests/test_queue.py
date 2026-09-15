@@ -165,7 +165,7 @@ def test_queue_next_reports_the_routing_decision(queued):
         assert isinstance(item.batchable, bool)
 
 
-def test_queue_report_separates_settled_from_open(queued):
+def test_queue_report_separates_settled_from_work_to_do(queued):
     from decomp.pipeline.queue import report, set_status
 
     before = report(queued).totals
@@ -177,7 +177,7 @@ def test_queue_report_separates_settled_from_open(queued):
     set_status(queued, open_addr, status="verified")
     after = report(queued).totals
     assert after["settled"] == before["settled"] + 1
-    assert after["open"] == before["open"] - 1
+    assert after["to do"] == before["to do"] - 1
 
 
 def test_set_status_rejects_unknown_values(queued):
@@ -215,3 +215,66 @@ def test_a_retry_thinks_harder():
 
 def test_an_unknown_tier_gets_a_middle_effort():
     assert difficulty.effort_for("nonsense") == "medium"
+
+
+# ---------------------------------------------------------------- work states
+def test_a_written_port_is_not_offered_again(queued):
+    """Treating "not yet verified" as "still open" made the queue hand back the
+    same functions round after round, and the port loop re-author work it had
+    already done."""
+    from decomp.pipeline.queue import next_items, set_status
+
+    first = next_items(queued, limit=1).items
+    assert first
+    addr = first[0].addr
+
+    set_status(queued, addr, status="written")
+    offered = {i.addr for i in next_items(queued, limit=20).items}
+    assert addr not in offered
+
+
+def test_work_in_flight_is_counted_separately_from_work_to_do(queued):
+    from decomp.pipeline.queue import report, set_status
+
+    addrs = [i.addr for i in next_items_all(queued)][:2]
+    before = report(queued).totals
+    set_status(queued, addrs[0], status="written")
+    set_status(queued, addrs[1], status="verified")
+    after = report(queued).totals
+
+    assert after["awaiting a session"] == before["awaiting a session"] + 1
+    assert after["settled"] == before["settled"] + 1
+    assert after["to do"] == before["to do"] - 2
+
+
+def next_items_all(project):
+    from decomp.pipeline.queue import next_items
+
+    return next_items(project, limit=50).items
+
+
+def test_a_diverged_port_is_offered_again(queued):
+    from decomp.pipeline.queue import next_items, set_status
+
+    addr = next_items(queued, limit=1).items[0].addr
+    set_status(queued, addr, status="divergent", attempts=1)
+    assert addr in {i.addr for i in next_items(queued, limit=20).items}
+
+
+def test_a_port_that_keeps_diverging_is_left_alone(queued):
+    """Three failed attempts is a signal to stop, not a reason to keep paying."""
+    from decomp.pipeline.queue import MAX_ATTEMPTS, next_items, set_status
+
+    addr = next_items(queued, limit=1).items[0].addr
+    set_status(queued, addr, status="divergent", attempts=MAX_ATTEMPTS)
+    assert addr not in {i.addr for i in next_items(queued, limit=20).items}
+
+
+def test_gated_and_uncalled_work_is_settled(queued):
+    from decomp.pipeline.queue import next_items, set_status
+
+    addrs = [i.addr for i in next_items(queued, limit=3).items]
+    for addr, status in zip(addrs, ("gate1", "uncalled", "needs_human"), strict=False):
+        set_status(queued, addr, status=status)
+    offered = {i.addr for i in next_items(queued, limit=20).items}
+    assert not offered & set(addrs)

@@ -49,7 +49,8 @@ class PortOutcome:
     def brief(self) -> str:
         head = addr_str(self.addr)
         if self.ok:
-            tail = f"{self.status}\t{self.path.name if self.path else ''}"
+            how = "translated" if self.model == "mechanical" else self.status
+            tail = f"{how}\t{self.path.name if self.path else ''}"
         elif self.blocked:
             tail = f"{self.blocked}\t{self.note[:60]}"
         else:
@@ -81,14 +82,28 @@ class PortRunResult:
     def cost(self) -> float:
         return sum(o.cost_usd for o in self.outcomes)
 
+    @property
+    def mechanical(self) -> int:
+        return sum(1 for o in self.outcomes if o.ok and o.model == "mechanical")
+
     def brief(self) -> str:
         lines = [o.brief() for o in self.outcomes]
-        lines.append(
+        summary = (
             f"--\twritten={self.written} blocked={self.blocked} failed={self.failed}"
             f"\t{self.tokens} tokens\t${self.cost:.4f}"
         )
+        lines.append(summary)
+        if self.mechanical:
+            # Otherwise a run where every function translated mechanically looks
+            # like the provider was asked and said nothing.
+            lines.append(
+                f"note\t{self.mechanical} of {self.written} translated without a "
+                f"model; --no-draft asks one anyway"
+            )
         if self.written:
-            lines.append(f"per written port\t{self.tokens // max(1, self.written)} tokens")
+            lines.append(
+                f"per written port\t{self.tokens // max(1, self.written)} tokens"
+            )
         return "\n".join(lines)
 
 
