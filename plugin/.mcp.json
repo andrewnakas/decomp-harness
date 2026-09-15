@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "decomp": {
+      "command": "decomp",
+      "args": ["mcp"]
+    }
+  }
+}

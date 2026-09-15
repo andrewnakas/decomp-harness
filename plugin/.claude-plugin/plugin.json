@@ -1,0 +1,8 @@
+{
+  "name": "decomp",
+  "displayName": "DecompHarness",
+  "description": "Reverse engineering where the mechanical work is mechanical and the model is asked only for judgment.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "keywords": ["reverse-engineering", "decompilation", "binary-analysis"]
+}
