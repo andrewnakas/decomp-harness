@@ -104,17 +104,26 @@ class LiftedToNative(Drafter):
         statements = _statements(body)
         if not statements:
             return DraftRefusal(addr, "no body")
-        if len(statements) > self.max_instructions:
-            return DraftRefusal(
-                addr, f"{len(statements)} instructions exceeds the mechanical limit"
-            )
 
+        # Translate first, then apply the length limit. Checking length up front
+        # reported "too long" for functions that would have hit an unrecognised
+        # construct anyway, which named the wrong constraint: on the hottest 200
+        # functions, raising the limit from 48 to 2000 changed coverage not at
+        # all. Translation is cheap and refuses safely, so attempting it costs
+        # nothing and the refusal it reports is the real one.
         state = _State(lines=[], windows=[], names={})
         for mnemonic, statement in statements:
             handled = self._translate(statement, mnemonic, state)
             if not handled:
                 # A draft that is nearly right costs a session to discover.
                 return DraftRefusal(addr, f"unrecognised: {statement[:60]}")
+
+        if len(statements) > self.max_instructions:
+            return DraftRefusal(
+                addr,
+                f"{len(statements)} instructions exceeds the mechanical limit: "
+                f"it translates, but a body this long is worth a reader",
+            )
 
         if not state.stores and not state.writes_r3:
             return DraftRefusal(addr, "nothing observable to compare")

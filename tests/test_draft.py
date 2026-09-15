@@ -173,3 +173,40 @@ def test_drafting_can_be_turned_off(project, fixtures, tmp_path):
     outcome = port_one(project, 0x82B10300, allow_draft=False)
     assert not outcome.ok          # no cassette, so the provider call fails
     assert "no cassette" in outcome.error
+
+
+def test_length_is_reported_only_when_it_is_the_real_constraint():
+    """Checking length first named the wrong cause: on the hottest 200 functions
+    of a real corpus, raising the limit from 48 to 2000 changed coverage not at
+    all, because they hit an unrecognised construct anyway."""
+    drafter = LiftedToNative(max_instructions=1)
+
+    # Long and unrecognisable: the unrecognised construct is what stopped it.
+    unrecognisable = """\
+DEFINE_REX_FUNC(sub_82B70000) {
+\t// bl 0x82b80000
+\tctx.lr = 0x82B70008;
+\tsub_82B80000(ctx, base);
+\treturn;
+}
+"""
+    assert "unrecognised" in drafter.draft(0x82B70000, unrecognisable, {}).reason
+
+    # Long but fully translatable: now length is the honest reason.
+    reason = drafter.draft(0x82B1D7E8, SIMPLE, {}).reason
+    assert "exceeds the mechanical limit" in reason
+    assert "worth a reader" in reason
+
+
+def test_the_draft_survey_groups_refusals_by_cause(project, fixtures):
+    from decomp.pipeline.draft import run as run_draft
+    from decomp.pipeline.importer import import_lifted
+
+    import_lifted(project, path=fixtures / "lifted")
+    project.db.execute("UPDATE function SET in_corpus=1 WHERE addr < 0x82F00000")
+
+    result = run_draft(project, write=False)
+    assert result.attempted > 0
+    # Categories, not one line per distinct statement.
+    assert all(len(reason) < 80 for reason in result.refusals)
+    assert "drafted" in result.brief()

@@ -899,6 +899,39 @@ def similar(
     ) or f"family {family} has one member")
 
 
+@app.command()
+def draft(
+    addrs: Annotated[list[str] | None, typer.Argument(help="Addresses to draft")] = None,
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    limit: Annotated[int, typer.Option("-n", help="How many to try")] = 0,
+    survey: Annotated[bool, typer.Option("--survey",
+                      help="Report coverage without writing anything")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Translate mechanically what needs no judgment, and say what declined."""
+    from ..core.db import parse_addr
+    from ..pipeline.draft import run as run_draft
+
+    out.set_json(json_out)
+    out.emit(run_draft(_open(project), addrs=[parse_addr(a) for a in (addrs or [])],
+                       subsystem=subsystem, limit=limit, write=not survey))
+
+
+@app.command()
+def lint(
+    addrs: Annotated[list[str] | None, typer.Argument(help="Addresses to check")] = None,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Re-check written ports without building anything."""
+    from ..core.db import parse_addr
+    from ..pipeline.lint import run as run_lint
+
+    out.set_json(json_out)
+    result = run_lint(_open(project), addrs=[parse_addr(a) for a in (addrs or [])])
+    out.emit(result)
+    raise typer.Exit(0 if result.ok else 1)
+
+
 def main() -> None:
     app()
 
