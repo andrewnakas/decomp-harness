@@ -760,6 +760,20 @@ def loop(
                       no_session=no_session, max_cost_usd=max_cost))
 
 
+@app.command()
+def mcp(
+    project: ProjectOpt = None,
+):
+    """Serve the same core over MCP, for driving this from a chat session."""
+    from ..core.config import find_project_root
+    from ..mcp.server import serve
+
+    root = project or find_project_root()
+    if root is None:
+        out.fail("no project here; run `decomp init` or pass --project")
+    serve(Path(root))
+
+
 def main() -> None:
     app()
 

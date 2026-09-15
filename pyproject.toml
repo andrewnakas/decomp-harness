@@ -14,7 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 ghidra = ["pyghidra>=3.1"]
 graph = ["igraph>=0.11"]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=2.0"]
 dev = ["pytest>=8", "ruff>=0.9"]
 
 [project.scripts]

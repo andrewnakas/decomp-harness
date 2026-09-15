@@ -7,6 +7,7 @@ to rediscover lives here with provenance.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,7 +26,13 @@ class Db:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path, isolation_level=None)
+        # Tools served over MCP run on a worker thread, and a connection bound
+        # to its creating thread throws there. The lock below is what makes
+        # sharing it safe.
+        self.conn = sqlite3.connect(
+            self.path, isolation_level=None, check_same_thread=False
+        )
+        self._lock = threading.RLock()
         self.conn.row_factory = _dict_factory
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
@@ -53,16 +60,20 @@ class Db:
 
     # ------------------------------------------------------------- basic ops
     def execute(self, sql: str, params: Sequence | Mapping = ()) -> sqlite3.Cursor:
-        return self.conn.execute(sql, params)
+        with self._lock:
+            return self.conn.execute(sql, params)
 
     def executemany(self, sql: str, rows: Iterable[Sequence | Mapping]) -> sqlite3.Cursor:
-        return self.conn.executemany(sql, rows)
+        with self._lock:
+            return self.conn.executemany(sql, rows)
 
     def query(self, sql: str, params: Sequence | Mapping = ()) -> list[dict[str, Any]]:
-        return self.conn.execute(sql, params).fetchall()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchall()
 
     def one(self, sql: str, params: Sequence | Mapping = ()) -> dict[str, Any] | None:
-        return self.conn.execute(sql, params).fetchone()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchone()
 
     def scalar(self, sql: str, params: Sequence | Mapping = (), default: Any = None) -> Any:
         row = self.one(sql, params)
@@ -72,18 +83,24 @@ class Db:
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
-        """Explicit transaction (isolation_level=None means autocommit otherwise)."""
-        self.conn.execute("BEGIN")
-        try:
-            yield self.conn
-        except Exception:
-            self.conn.execute("ROLLBACK")
-            raise
-        else:
-            self.conn.execute("COMMIT")
+        """Explicit transaction (isolation_level=None means autocommit otherwise).
+
+        The lock is held for the whole transaction: a second thread writing
+        between BEGIN and COMMIT would land inside someone else's unit of work.
+        """
+        with self._lock:
+            self.conn.execute("BEGIN")
+            try:
+                yield self.conn
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+            else:
+                self.conn.execute("COMMIT")
 
     # --------------------------------------------------------------- upserts
-    def upsert(self, table: str, row: Mapping[str, Any], key: str | Sequence[str]) -> None:
+    def upsert(self, table: str, row: Mapping[str, Any],
+               key: str | Sequence[str]) -> None:
         keys = [key] if isinstance(key, str) else list(key)
         cols = list(row.keys())
         placeholders = ", ".join("?" for _ in cols)
@@ -94,7 +111,8 @@ class Db:
             sql += f" ON CONFLICT({conflict}) DO UPDATE SET {updates}"
         else:
             sql += f" ON CONFLICT({conflict}) DO NOTHING"
-        self.conn.execute(sql, [row[c] for c in cols])
+        with self._lock:
+            self.conn.execute(sql, [row[c] for c in cols])
 
     def meta_get(self, key: str, default: Any = None) -> Any:
         return self.scalar("SELECT value FROM meta WHERE key=?", (key,), default)
