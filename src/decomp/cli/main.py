@@ -559,6 +559,118 @@ def brief(
     out.emit(pf.text if show and not json_out else pf)
 
 
+# ------------------------------------------------------- build / verify loop
+@app.command()
+def build(
+    host: Annotated[str, typer.Option(help="Host from decomp.toml, or local")] = "",
+    target: Annotated[list[str] | None, typer.Option("--target", help="Build targets")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would run")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Compile the written ports and prove the binary actually changed."""
+    from ..pipeline.build import run as run_build
+
+    out.set_json(json_out)
+    result = run_build(_open(project), host=host, targets=list(target or []),
+                       dry_run=dry_run)
+    out.emit(result)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@app.command()
+def session(
+    label: Annotated[str, typer.Option(help="Name for this run")] = "",
+    profile: Annotated[str, typer.Option(help="boot | play | map")] = "play",
+    host: Annotated[str, typer.Option(help="Host from decomp.toml")] = "",
+    duration: Annotated[int, typer.Option(help="Seconds to run")] = 120,
+    controls: Annotated[int, typer.Option(help="Deliberately wrong ports to arm")] = 2,
+    allow_stale: Annotated[bool, typer.Option("--allow-stale",
+                           help="Run even if the armed set is not in the binary")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Run the program with the candidate ports armed, plus controls."""
+    from ..pipeline.session import run as run_session
+
+    out.set_json(json_out)
+    result = run_session(_open(project), label=label, profile=profile, host=host,
+                         duration_s=duration, controls=controls,
+                         allow_stale=allow_stale, dry_run=dry_run)
+    out.emit(result)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@app.command()
+def verify(
+    session_id: Annotated[int, typer.Option("--session", help="Session id")] = 0,
+    log: Annotated[Path | None, typer.Option(help="Read a log file directly")] = None,
+    no_controls: Annotated[bool, typer.Option("--no-controls",
+                           help="Record verdicts without a passing control")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Turn a session log into verdicts, if the session could have failed."""
+    from ..pipeline.verify import run as run_verify
+
+    out.set_json(json_out)
+    result = run_verify(_open(project), session_id=session_id or None,
+                        log_path=str(log) if log else "",
+                        require_controls=not no_controls)
+    out.emit(result)
+    raise typer.Exit(0 if result.trusted else 1)
+
+
+@app.command()
+def promote(
+    min_calls: Annotated[int, typer.Option(help="Override the call threshold")] = 0,
+    min_ratio: Annotated[float, typer.Option(help="Override calls per line")] = 0.0,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Decide without writing")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Decide which verified ports have enough evidence to run for real."""
+    from ..pipeline.promote import run as run_promote
+
+    out.set_json(json_out)
+    out.emit(run_promote(_open(project), min_calls=min_calls, min_ratio=min_ratio,
+                         dry_run=dry_run))
+
+
+@app.command()
+def hosts(
+    add: Annotated[str, typer.Option(help="Name for a new host")] = "",
+    ssh: Annotated[str, typer.Option(help="user@host")] = "",
+    workdir: Annotated[str, typer.Option(help="Remote working directory")] = "",
+    check: Annotated[bool, typer.Option(help="Test each configured host")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Configure or test the machines stages can run on."""
+    from ..core.remote import transport_for
+
+    out.set_json(json_out)
+    proj = _open(project)
+
+    if add:
+        lines = [f'\n[hosts.{add}]', f'ssh = "{ssh}"']
+        if workdir:
+            lines.append(f'workdir = "{workdir}"')
+        with open(proj.root / "decomp.toml", "a") as f:
+            f.write("\n".join(lines) + "\n")
+        out.emit(f"host\t{add}\t{ssh}\tadded to decomp.toml")
+        return
+
+    rows = []
+    names = list(proj.get("hosts", {}) or {}) or ["local"]
+    for name in names:
+        transport = transport_for(proj, name if name != "local" else "")
+        if check:
+            result = transport.check()
+            rows.append(f"{name}\t{'reachable' if result.ok else 'unreachable'}"
+                        f"\t{transport.host.ssh or 'local'}")
+        else:
+            rows.append(f"{name}\t{transport.host.ssh or 'local'}"
+                        f"\t{transport.host.workdir}")
+    out.emit("\n".join(rows))
+
+
 def main() -> None:
     app()
 
