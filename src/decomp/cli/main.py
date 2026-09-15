@@ -932,8 +932,26 @@ def lint(
     raise typer.Exit(0 if result.ok else 1)
 
 
+# Conditions the harness reports rather than crashes on: a prerequisite that is
+# not met yet, a file that is not there, a value that does not make sense. These
+# are answers, not faults, and a traceback buries the sentence that says what to
+# do about them.
+EXPECTED = (FileNotFoundError, ValueError, KeyError, RuntimeError)
+
+
 def main() -> None:
-    app()
+    try:
+        app()
+    except EXPECTED as exc:
+        # KeyError stringifies with its own quotes, which reads badly in a
+        # message meant for a person.
+        message = str(exc).strip("'") if isinstance(exc, KeyError) else str(exc)
+        out.fail(message)
+    except BrokenPipeError:
+        # `decomp ... | head` closes the pipe early; that is not an error.
+        raise SystemExit(0) from None
+    except KeyboardInterrupt:
+        out.fail("interrupted", code=130)
 
 
 if __name__ == "__main__":

@@ -118,3 +118,25 @@ def test_the_skills_tell_the_model_not_to_read_the_corpus():
     assert "Do not open" in porting or "do not open" in porting
     hunting = (PLUGIN / "skills" / "decomp-hunt" / "SKILL.md").read_text()
     assert "do not grep" in hunting.lower()
+
+
+# ------------------------------------------------------------------ install
+def test_expected_failures_are_messages_not_tracebacks():
+    """A prerequisite that is not met yet is an answer, not a fault, and a
+    traceback buries the sentence that says what to do about it."""
+    import subprocess
+    import sys
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {"PATH": "/usr/bin:/bin", "HOME": tmp}
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.argv=['decomp','status']; "
+             "from decomp.cli.main import main; main()"],
+            capture_output=True, text=True, cwd=tmp, timeout=60,
+            env={**env, "PYTHONPATH": str(Path(__file__).parent.parent / "src")},
+        )
+    assert result.returncode != 0
+    assert "Traceback" not in result.stderr
+    assert "decomp init" in result.stderr

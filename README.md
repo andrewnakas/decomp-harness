@@ -48,13 +48,24 @@ eight, at zero cost.
 ## Install
 
 ```sh
-uv venv --python 3.13
-uv pip install -e ".[dev]"
+uv tool install --editable . --python 3.13 --with pyghidra --with mcp
 decomp doctor
 ```
 
+That puts `decomp` on your PATH and keeps it pointed at this checkout, so edits
+take effect without reinstalling. `doctor` reports what is missing and what it
+would enable.
+
 Python 3.13 is pinned because Ghidra's bundled PyGhidra ships wheels for 3.9
-through 3.13 only. `doctor` reports what is missing and what it would enable.
+through 3.13 only. The `pyghidra` extra is what makes `decomp analyze` work; the
+`mcp` extra is what makes `decomp mcp` work. Without them everything else still
+runs and `doctor` says so.
+
+For working on the harness itself:
+
+```sh
+uv venv --python 3.13 && uv pip install -e ".[dev]" && pytest
+```
 
 ## Sign-in
 

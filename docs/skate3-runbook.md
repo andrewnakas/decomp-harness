@@ -5,6 +5,9 @@ What follows is the real sequence, with the numbers this machine produced.
 ## Once
 
 ```sh
+uv tool install --editable ~/Documents/DecompHarness --python 3.13 \
+    --with pyghidra --with mcp
+
 decomp init ~/Documents/skate3-decomp --target xex --name skate3 \
     --recomp ~/skate3/skate3recomp-dev
 cd ~/Documents/skate3-decomp
