@@ -83,10 +83,19 @@ class CostReport:
         return self.input_tokens + self.output_tokens
 
     @property
+    def cost_weighted(self) -> int:
+        """Tokens as their equivalent in fresh input, so two ways of doing the
+        same work can be compared without a cache-heavy one looking expensive."""
+        from .baseline import weighted
+
+        return weighted(self.input_tokens, self.cache_read, self.cache_write,
+                        self.output_tokens)
+
+    @property
     def per_verified(self) -> float | None:
         if not self.verified:
             return None
-        return round(self.total_tokens / self.verified, 1)
+        return round(self.cost_weighted / self.verified, 1)
 
     @property
     def cache_hit_rate(self) -> float:
@@ -103,8 +112,9 @@ class CostReport:
             f"verified\t{self.verified}\tpromoted\t{self.promoted}"
             f"\tzero_token\t{self.mechanical}",
         ]
+        lines.append(f"cost-weighted\t{self.cost_weighted}")
         if self.per_verified is not None:
-            lines.append(f"tokens/verified\t{self.per_verified:.0f}")
+            lines.append(f"weighted/verified\t{self.per_verified:.0f}")
         if self.baseline_per_verified:
             lines.append(f"baseline/verified\t{self.baseline_per_verified:.0f}")
             if self.per_verified:

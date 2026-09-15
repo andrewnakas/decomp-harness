@@ -16,6 +16,34 @@ from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
+# Relative price of each token kind, against fresh input at 1.0. A cached read
+# costs a small fraction of a fresh one, and output costs several times more, so
+# summing the four kinds and calling the result "tokens" overstates a
+# cache-heavy session by a wide margin. These are the published ratios rounded
+# to something defensible across the current model line.
+PRICE_WEIGHTS = {
+    "input": 1.0,
+    "cache_read": 0.1,
+    "cache_write": 1.25,
+    "output": 5.0,
+}
+
+
+def weighted(input_tokens: int, cache_read: int, cache_write: int,
+             output: int) -> int:
+    """Tokens expressed as their equivalent in fresh input tokens.
+
+    This is the number worth comparing between two ways of doing the same work.
+    A raw sum would say a session that read 479 million cached tokens cost
+    eighty times what it did.
+    """
+    return round(
+        input_tokens * PRICE_WEIGHTS["input"]
+        + cache_read * PRICE_WEIGHTS["cache_read"]
+        + cache_write * PRICE_WEIGHTS["cache_write"]
+        + output * PRICE_WEIGHTS["output"]
+    )
+
 
 def slug_for(path: Path | str) -> str:
     """Claude Code's directory naming: absolute path with separators as dashes."""
@@ -36,13 +64,14 @@ class SessionUsage:
     last_ts: str = ""
 
     @property
-    def billed_input(self) -> int:
-        """Tokens that actually had to be sent: fresh input plus cache writes."""
-        return self.input_tokens + self.cache_write
+    def total(self) -> int:
+        """Raw sum of every token kind. Use `cost_weighted` for comparisons."""
+        return self.input_tokens + self.cache_read + self.cache_write + self.output_tokens
 
     @property
-    def total(self) -> int:
-        return self.input_tokens + self.cache_read + self.cache_write + self.output_tokens
+    def cost_weighted(self) -> int:
+        return weighted(self.input_tokens, self.cache_read, self.cache_write,
+                        self.output_tokens)
 
 
 @dataclass
@@ -72,10 +101,18 @@ class BaselineReport:
         return sum(s.total for s in self.sessions)
 
     @property
+    def cost_weighted(self) -> int:
+        return weighted(self.input_tokens, self.cache_read, self.cache_write,
+                        self.output_tokens)
+
+    @property
     def per_verified(self) -> float | None:
+        """Cost-weighted tokens per verified function, which is the comparable
+        figure. The raw total is reported alongside but is not what anyone
+        pays."""
         if not self.verified:
             return None
-        return round(self.total / self.verified, 1)
+        return round(self.cost_weighted / self.verified, 1)
 
     def brief(self) -> str:
         lines = [
@@ -84,11 +121,18 @@ class BaselineReport:
             f"messages\t{sum(s.messages for s in self.sessions)}",
             f"tokens\tin={self.input_tokens} cache_r={self.cache_read} "
             f"cache_w={self.cache_write} out={self.output_tokens}",
-            f"total\t{self.total}",
+            f"raw total\t{self.total}",
+            f"cost-weighted\t{self.cost_weighted}\t(cache reads at a tenth, "
+            f"output at five times)",
         ]
         if self.verified:
             lines.append(f"verified\t{self.verified}")
-            lines.append(f"tokens/verified\t{self.per_verified:.0f}")
+            lines.append(f"weighted/verified\t{self.per_verified:.0f}")
+            lines.append(
+                "caveat\tthis counts everything those sessions did, not only "
+                "the work being compared. Narrow it with --since and --until, "
+                "or by scanning fewer project directories, before quoting it."
+            )
         return "\n".join(lines)
 
 

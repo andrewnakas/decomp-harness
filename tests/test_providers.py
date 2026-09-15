@@ -101,3 +101,13 @@ def test_replay_roundtrip_and_retry_distinct(tmp_path):
     retry = LLMRequest(prompt="packet body", prefix="brief", purpose="port",
                        resume_session="s1")
     assert provider.key(retry) != key
+
+
+def test_effort_reaches_the_command_line():
+    """Leaving it unset means the provider's default, which is high."""
+    provider = ClaudeCliProvider()
+    argv = provider.build_argv(LLMRequest(prompt="x", effort="low"), None, None)
+    assert argv[argv.index("--effort") + 1] == "low"
+
+    # Not passed at all when unset, so the provider keeps its own default.
+    assert "--effort" not in provider.build_argv(LLMRequest(prompt="x"), None, None)

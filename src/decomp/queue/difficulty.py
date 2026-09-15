@@ -60,6 +60,24 @@ def tier_for(difficulty: float, vmx: bool = False, attempts: int = 0,
     return "small"
 
 
+# How hard the model should think, per tier. Output is billed at several times
+# input, and on a simple port the reasoning dwarfs the answer: one measured call
+# produced 25,377 output tokens for an answer of about two thousand. Leaving
+# effort unset means the provider's default, which is high.
+EFFORT_BY_TIER = {
+    "small": "low",
+    "mid": "medium",
+    "strong": "high",
+}
+
+
+def effort_for(tier: str, retrying: bool = False) -> str:
+    """Effort for a tier. A retry thinks harder: the cheap pass already failed."""
+    if retrying:
+        return "high"
+    return EFFORT_BY_TIER.get(tier, "medium")
+
+
 def batchable(fn: dict[str, Any], difficulty: float, max_lines: int = 40) -> bool:
     """Small, scalar, ungated functions can share one call."""
     if fn.get("vmx128") or fn.get("gate"):

@@ -194,3 +194,24 @@ def test_building_an_empty_corpus_is_an_error(project):
 
     with pytest.raises(ValueError, match="nothing in the corpus"):
         build(project)
+
+
+# ------------------------------------------------------------------- effort
+def test_effort_scales_with_the_tier():
+    """Output is billed at several times input, and on a simple port the
+    reasoning dwarfs the answer: one measured call produced 25,377 output
+    tokens for an answer of about two thousand."""
+    assert difficulty.effort_for("small") == "low"
+    assert difficulty.effort_for("mid") == "medium"
+    assert difficulty.effort_for("strong") == "high"
+
+
+def test_a_retry_thinks_harder():
+    """The cheap pass already failed, so spending more on the second is the
+    correct trade."""
+    assert difficulty.effort_for("small", retrying=True) == "high"
+    assert difficulty.effort_for("mid", retrying=True) == "high"
+
+
+def test_an_unknown_tier_gets_a_middle_effort():
+    assert difficulty.effort_for("nonsense") == "medium"

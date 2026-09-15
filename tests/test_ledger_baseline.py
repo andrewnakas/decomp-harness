@@ -62,7 +62,13 @@ def test_report_totals_and_rates(project):
     assert rep.verified == 2          # verified + promoted both count as verified work
     assert rep.promoted == 1
     assert rep.cache_hit_rate == round(1800 / 2000, 3)
-    assert rep.per_verified == round((200 + 100) / 2, 1)
+    # Per-verified uses the cost-weighted figure, not a raw sum: a raw sum makes
+    # a cache-heavy run look far more expensive than it was.
+    from decomp.llm.baseline import weighted
+
+    expected = weighted(rep.input_tokens, rep.cache_read, rep.cache_write,
+                        rep.output_tokens) / 2
+    assert rep.per_verified == round(expected, 1)
 
 
 def test_report_grouping(project):
@@ -109,3 +115,34 @@ def test_baseline_scans_transcripts(tmp_path):
     )
     assert windowed[0].messages == 1
     assert windowed[0].total == 10 + 500 + 100 + 40
+
+
+def test_cost_weighting_reflects_what_is_actually_paid():
+    """Summing the four token kinds says a session that read 479 million cached
+    tokens cost eighty times what it did."""
+    from decomp.llm.baseline import weighted
+
+    cache_heavy = weighted(input_tokens=3_000, cache_read=479_000_000,
+                           cache_write=4_400_000, output=1_365_000)
+    raw = 3_000 + 479_000_000 + 4_400_000 + 1_365_000
+    assert cache_heavy < raw / 5
+
+    # Output is the expensive side, so it dominates a short exchange.
+    assert weighted(0, 0, 0, 1000) > weighted(1000, 0, 0, 0)
+    assert weighted(0, 1000, 0, 0) < weighted(1000, 0, 0, 0)
+
+
+def test_the_baseline_states_what_it_includes(tmp_path):
+    """A figure that counts unrelated work flatters whatever it is compared
+    against, so it should say so."""
+    from decomp.llm.baseline import BaselineReport, SessionUsage
+
+    report = BaselineReport(
+        sessions=[SessionUsage(session="s", path=tmp_path, messages=10,
+                               input_tokens=100, output_tokens=50)],
+        verified=5,
+    )
+    text = report.brief()
+    assert "caveat" in text
+    assert "not only the work being compared" in text
+    assert "cost-weighted" in text
