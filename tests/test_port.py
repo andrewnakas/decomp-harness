@@ -444,3 +444,32 @@ def test_work_the_translator_handles_never_enters_a_batch(batchable_project):
     assert batchable_project.db.scalar(
         "SELECT COUNT(*) FROM llm_call WHERE purpose='batch'"
     ) == 0
+
+
+def test_nulls_the_strict_schema_invites_are_accepted():
+    """Strict structured output cannot leave a field out, so optional ones are
+    made nullable and the model returns null. Rejecting the null we asked for
+    failed six functions in a live run."""
+    answer = parse_port_answer({
+        "addr": "82B28A00",
+        "code": "REX_STORE_U32(ctx.r3.u32 + 8, ctx.r4.u32);",
+        "windows": [{"base": "r3", "deref": None, "offset": None,
+                     "length": 4, "why": None}],
+        "result_registers": ["r3"],
+        "fields": None, "names": None, "note": None, "signature": None,
+        "name": None, "blocked": None, "needs": None, "needs_arg": None,
+    })
+    window = answer.windows[0]
+    assert window.deref == []          # a list field, not None
+    assert window.offset == 0
+    assert window.why == ""
+    assert answer.fields == [] and answer.names == []
+    assert answer.note == "" and answer.blocked == ""
+    # And it still lints, which is the point of accepting it.
+    assert lint.check(answer, 0x82B28A00).ok
+
+
+def test_a_required_field_is_still_required():
+    """Accepting nulls must not turn a missing body into a valid answer."""
+    with pytest.raises(ValueError, match="code"):
+        parse_port_answer({"addr": "82B28A00", "code": None})

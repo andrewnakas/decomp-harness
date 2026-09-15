@@ -14,10 +14,32 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
-class Window(BaseModel):
+class Nullable(BaseModel):
+    """Accepts null wherever a field is optional.
+
+    Strict structured output cannot leave a field out, so an optional one is
+    made nullable instead and the model returns null for it. Having asked for
+    that, the schema has to accept it: rejecting the null it invited failed six
+    functions in a live run before anyone noticed.
+    """
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _null_means_default(cls, value, info):
+        if value is not None:
+            return value
+        field = cls.model_fields.get(info.field_name)
+        if field is None:
+            return value
+        if field.default_factory is not None:
+            return field.default_factory()
+        return field.default if field.default is not None else value
+
+
+class Window(Nullable):
     """One span of guest memory the body writes.
 
     The oracle rewinds exactly these bytes before running the candidate. A write
@@ -36,7 +58,7 @@ class Window(BaseModel):
     why: str = Field(default="", max_length=120, description="What lives there")
 
 
-class FieldFinding(BaseModel):
+class FieldFinding(Nullable):
     """A struct field the body revealed."""
 
     struct: str
@@ -49,14 +71,14 @@ class FieldFinding(BaseModel):
                           description="The line or expression that shows it")
 
 
-class NameFinding(BaseModel):
+class NameFinding(Nullable):
     addr: str = Field(description="Hex address, e.g. '82B28A00'")
     name: str
     confidence: float = Field(default=0.6, ge=0.0, le=1.0)
     why: str = Field(default="", max_length=120)
 
 
-class PortAnswer(BaseModel):
+class PortAnswer(Nullable):
     """One ported function."""
 
     addr: str = Field(description="The address from the packet header, hex")
@@ -100,13 +122,13 @@ class PortAnswer(BaseModel):
                                  description="What to fetch, e.g. a callee address")
 
 
-class BatchAnswer(BaseModel):
+class BatchAnswer(Nullable):
     """Several small functions answered in one call."""
 
     ports: list[PortAnswer]
 
 
-class TriageAnswer(BaseModel):
+class TriageAnswer(Nullable):
     """A cheap classification pass, used for naming and routing."""
 
     addr: str
