@@ -394,6 +394,22 @@ def corpus_grow(
                   subsystem=subsystem, max_depth=max_depth, stop_kinds=stop, force=force))
 
 
+# -------------------------------------------------------------------- screen
+@app.command()
+def screen(
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    scope: Annotated[str, typer.Option(help="corpus | all")] = "corpus",
+    limit: Annotated[int, typer.Option(help="Screen only the hottest N")] = 0,
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Decide statically which functions an oracle can bracket. Costs no tokens."""
+    from ..pipeline.screen import screen as run_screen
+
+    out.set_json(json_out)
+    out.emit(run_screen(_open(project), subsystem=subsystem, scope=scope,
+                        limit=limit, force=force))
+
+
 def main() -> None:
     app()
 
