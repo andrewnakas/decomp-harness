@@ -25,12 +25,14 @@ import_app = typer.Typer(help="Ingest what is already known.", no_args_is_help=T
 corpus_app = typer.Typer(help="Bound the work by call-graph closure.", no_args_is_help=True)
 queue_app = typer.Typer(help="What to work on next, and why.", no_args_is_help=True)
 subsystems_app = typer.Typer(help="Find the seams in a binary.", invoke_without_command=True)
+structs_app = typer.Typer(help="Recovered layouts, in and out.", no_args_is_help=True)
 llm_app = typer.Typer(help="Provider smoke tests and the token ledger.", no_args_is_help=True)
 lesson_app = typer.Typer(help="Traps recorded as checks.", no_args_is_help=True)
 app.add_typer(import_app, name="import")
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(queue_app, name="queue")
 app.add_typer(subsystems_app, name="subsystems")
+app.add_typer(structs_app, name="structs")
 app.add_typer(llm_app, name="llm")
 app.add_typer(lesson_app, name="lesson")
 
@@ -772,6 +774,129 @@ def mcp(
     if root is None:
         out.fail("no project here; run `decomp init` or pass --project")
     serve(Path(root))
+
+
+# ------------------------------------------------------------------- structs
+@structs_app.command("export")
+def structs_export(
+    out_dir: Annotated[Path | None, typer.Option("--out", help="Where to write")] = None,
+    established_only: Annotated[bool, typer.Option("--established-only",
+                                help="Leave out proposals")] = False,
+    show: Annotated[bool, typer.Option(help="Print the header instead of writing it")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Write the recovered layouts as a header, with offset assertions."""
+    from ..pipeline.structs import export
+
+    out.set_json(json_out)
+    result = export(_open(project), out_dir=out_dir,
+                    include_proposed=not established_only, write=not show)
+    out.emit(result.text if show and not json_out else result)
+
+
+@structs_app.command("check")
+def structs_check(
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Look for layouts that disagree with themselves."""
+    from ..pipeline.structs import check
+
+    out.set_json(json_out)
+    result = check(_open(project))
+    out.emit(result)
+    raise typer.Exit(0 if result.ok else 1)
+
+
+@structs_app.command("show")
+def structs_show(
+    name: Annotated[str, typer.Argument(help="Struct name")],
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """One layout, with where each offset came from."""
+    from ..core.db import addr_str
+
+    out.set_json(json_out)
+    proj = _open(project)
+    struct = proj.db.one("SELECT * FROM struct WHERE name=?", (name,))
+    if not struct:
+        known = [r["name"] for r in proj.db.query("SELECT name FROM struct ORDER BY name")]
+        out.fail(f"no struct '{name}'. Known: {', '.join(known) or '(none)'}")
+    rows = proj.db.query(
+        "SELECT * FROM struct_field WHERE struct_id=? ORDER BY offset", (struct["id"],)
+    )
+    lines = [f"{struct['name']}\tsize=0x{(struct.get('size') or 0):X}"]
+    for r in rows:
+        cited = proj.db.query(
+            "SELECT function_addr FROM field_evidence WHERE field_id=? "
+            "AND function_addr IS NOT NULL LIMIT 3", (r["id"],)
+        )
+        where = " ".join(addr_str(c["function_addr"]) for c in cited)
+        mark = "" if r["status"] in ("established", "confirmed") else f" [{r['status']}]"
+        lines.append(
+            f"  +0x{r['offset']:03X}  {(r['ctype'] or 'u32'):<12} {r['name']}{mark}"
+            + (f"\t{where}" if where else "")
+        )
+    out.emit("\n".join(lines))
+
+
+@app.command()
+def search(
+    name: Annotated[str, typer.Option(help="Substring of a function name")] = "",
+    constant: Annotated[str, typer.Option(help="An address some function references")] = "",
+    limit: Annotated[int, typer.Option(help="How many")] = 20,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Find functions by name, or by a constant they reference."""
+    from ..core.db import addr_str, parse_addr
+
+    out.set_json(json_out)
+    proj = _open(project)
+    if constant:
+        value = parse_addr(constant)
+        rows = proj.db.query(
+            "SELECT c.addr, f.name FROM const_ref c LEFT JOIN function f "
+            "ON f.addr=c.addr WHERE c.value=? LIMIT ?", (value, limit),
+        )
+        out.emit("\n".join(
+            f"{addr_str(r['addr'])}\t{r.get('name') or ''}" for r in rows
+        ) or f"no function references 0x{value:08X}")
+        return
+    if not name:
+        out.fail("pass --name or --constant")
+    rows = proj.db.query(
+        "SELECT addr, name, tier, status FROM function WHERE name LIKE ? LIMIT ?",
+        (f"%{name}%", limit),
+    )
+    out.emit("\n".join(
+        f"{addr_str(r['addr'])}\t{r['name']}\t{r.get('tier') or ''}"
+        f"\t{r.get('status') or ''}" for r in rows
+    ) or f"nothing matching '{name}'")
+
+
+@app.command()
+def similar(
+    addr: Annotated[str, typer.Argument(help="Function address")],
+    limit: Annotated[int, typer.Option(help="How many")] = 8,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Functions with a similar shape, so one insight serves several."""
+    from ..core.db import addr_str, parse_addr
+
+    out.set_json(json_out)
+    proj = _open(project)
+    target = parse_addr(addr)
+    family = proj.db.scalar("SELECT family_id FROM function WHERE addr=?", (target,))
+    if not family:
+        out.emit(f"{addr_str(target)}\tno family")
+        return
+    rows = proj.db.query(
+        "SELECT addr, name, status FROM function WHERE family_id=? AND addr!=? "
+        "ORDER BY COALESCE(hot,0) DESC LIMIT ?", (family, target, limit),
+    )
+    out.emit("\n".join(
+        f"{addr_str(r['addr'])}\t{r.get('name') or ''}\t{r.get('status') or ''}"
+        for r in rows
+    ) or f"family {family} has one member")
 
 
 def main() -> None:
