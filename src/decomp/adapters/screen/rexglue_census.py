@@ -168,7 +168,15 @@ class RexGlueCensus(GateScreener):
         derived = [s for s in result.stores if s.base == "derived"]
         loop_bound = [s for s in result.stores if s.base == "loop"]
         unknown = [s for s in result.stores if s.base == "unknown"]
+        # A derived base is fine when the screener can say where it came from:
+        # the window builder reads that word before the call. One it cannot
+        # trace is still portable - the audio project verified two such
+        # functions over thousands of calls - but the tracer cannot supply the
+        # chain, so the hint must say so rather than print a scratch register
+        # that would be rejected if copied.
+        untraceable = [s for s in derived if not s.derived_from]
         result.census["gate2_suspects"] = len(derived)
+        result.census["untraceable_bases"] = len(untraceable)
 
         if loop_bound:
             result.gate = "gate2"
@@ -217,6 +225,12 @@ class RexGlueCensus(GateScreener):
                 # invites a window rooted at the wrong address.
                 window["base"] = s.derived_from[0]
                 window["deref"] = [s.derived_from[1]]
+            elif s.base == "derived":
+                # The tracer lost the chain. Naming the scratch register would
+                # be worse than saying nothing: an author who copies it declares
+                # a window on a register that holds nothing at entry.
+                window["base"] = ""
+                window["untraced"] = s.base_ref or "?"
             result.suggested_windows.append(window)
         if derived:
             result.reasons.append(

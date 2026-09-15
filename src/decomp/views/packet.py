@@ -332,6 +332,15 @@ def _window_hint(project: Project, addr: int) -> str:
     for w in windows[:8]:
         base = w.get("base") or "r3"
         off = w.get("offset")
+        if w.get("untraced"):
+            # Say what is known and no more. The store goes through a pointer
+            # the body computes; working out where it came from is the job the
+            # author is being asked to do.
+            parts.append(
+                f"<computed>+{w.get('offset') or 0}:{w.get('len')}"
+            )
+            any_deref = True
+            continue
         chain = w.get("deref") or []
         if chain:
             any_deref = True
@@ -346,8 +355,13 @@ def _window_hint(project: Project, addr: int) -> str:
         suffix = f"+{off}" if off else ""
         parts.append(f"{addr}{suffix}:{w.get('len')}")
     tail = f" (+{len(windows) - 8} more)" if len(windows) > 8 else ""
-    hint = ("    ([r3+4] means: load a pointer from r3+4, then offset from there)"
-            if any_deref else "")
+    hint = ""
+    if any_deref:
+        hint = "    ([r3+4] means: load a pointer from r3+4, then offset there"
+        if any(w.get("untraced") for w in windows[:8]):
+            hint += "; <computed> means the base is worked out in the body and "
+            hint += "you must trace it yourself"
+        hint += ")"
     return " ".join(parts) + tail + hint
 
 

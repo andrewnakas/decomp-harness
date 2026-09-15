@@ -31,6 +31,11 @@ MAX_ATTEMPTS = 3
 # nothing but thinking.
 PORT_MAX_TURNS = 4
 
+# How long to wait for one answer, by tier. A cheap call that has not answered
+# in three minutes is not about to: one real run lost fifteen minutes to a
+# single hung call before giving up on it.
+TIMEOUT_BY_TIER = {"small": 240, "mid": 420, "strong": 900}
+
 
 @dataclass
 class PortOutcome:
@@ -233,6 +238,7 @@ def port_one(project: Project, addr: int, provider_name: str = "",
             purpose="retry" if feedback else "port",
             addrs=[addr],
             cache_ttl=project.get("providers.claude.cache_ttl", "1h"),
+            timeout_s=TIMEOUT_BY_TIER.get(resolved_tier, 420),
         )
         result = provider.call(req)
         ledger.record(project, provider.id, req, result, attempt=attempt,
@@ -412,6 +418,8 @@ def port_batch(project: Project, addrs: list[int], provider_name: str = "",
         cwd=work_dir, purpose="batch", addrs=list(addrs),
         cache_ttl=project.get("providers.claude.cache_ttl", "1h"),
         effort=difficulty_mod.effort_for(tier or "small"),
+        # A batch is several functions, so it earns more time than one.
+        timeout_s=TIMEOUT_BY_TIER.get(tier or "small", 420) * 2,
     )
     result = provider.call(req)
     ledger.record(project, provider.id, req, result, packet_tokens_est=total_tokens)

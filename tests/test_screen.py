@@ -180,3 +180,43 @@ def test_screen_stage_persists_gates_and_reasons(project, fixtures):
                if g == "pass"]
     for addr in passing:
         assert project.db.scalar("SELECT gate FROM function WHERE addr=?", (addr,)) is None
+
+
+def test_an_untraceable_base_is_marked_rather_than_named(screener):
+    """Naming the scratch register would be worse than saying nothing: an author
+    who copies it declares a window on a register that holds nothing at entry,
+    which lint rejects - a loop they cannot escape."""
+    body = """
+DEFINE_REX_FUNC(sub_828E30B8) {
+\t// lwz r11,0(r3)
+\tctx.r11.u64 = REX_LOAD_U32(ctx.r3.u32 + 0);
+\t// lwzx r11,r11,r9
+\tctx.r11.u64 = REX_LOAD_U32(ctx.r11.u32 + ctx.r9.u32);
+\t// stw r4,4(r11)
+\tREX_STORE_U32(ctx.r11.u32 + 4, ctx.r4.u32);
+\treturn;
+}
+"""
+    result = screener.screen(0x828E30B8, body)
+    window = result.suggested_windows[0]
+    assert window["base"] == ""
+    assert window["untraced"] == "r11"
+    # Still portable: the audio project verified two such functions over
+    # thousands of calls. The tracer is the limitation, not the function.
+    assert result.gate == "pass"
+
+
+def test_a_traceable_base_still_carries_its_chain(screener):
+    body = """
+DEFINE_REX_FUNC(sub_82B10000) {
+\t// lwz r9,48(r3)
+\tctx.r9.u64 = REX_LOAD_U32(ctx.r3.u32 + 48);
+\t// stw r4,0(r9)
+\tREX_STORE_U32(ctx.r9.u32 + 0, ctx.r4.u32);
+\treturn;
+}
+"""
+    window = screener.screen(0x82B10000, body).suggested_windows[0]
+    assert window["base"] == "r3"
+    assert window["deref"] == [48]
+    assert "untraced" not in window
