@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..core.db import parse_addr
-from ..core.hashing import sha256_file
 from ..core.stages import now_iso, stage
 
 if TYPE_CHECKING:
@@ -42,32 +41,54 @@ class ImportResult:
 def import_image(project: Project, ctx, path: Path | str, base: int | None = None,
                  name: str = "") -> ImportResult:
     """Register the target image: the bytes everything else refers to."""
+    from ..adapters.target.rawimage import detect, get_loader
+
     path = Path(path).resolve()
     if not path.is_file():
         raise FileNotFoundError(f"image not found: {path}")
-    base = base if base is not None else _parse_int(project.get("target.base_addr", 0))
-    sha = sha256_file(path)
+
+    # An explicit, specific loader wins. But `rawimage` is the generic default
+    # that `init` writes, so detection still runs over it: pointing at an
+    # encrypted container by mistake should be caught here, not three stages
+    # later when every address turns out wrong.
+    configured = project.get("project.target_adapter", "")
+    if configured and configured != "rawimage":
+        loader = get_loader(configured)
+    else:
+        loader = detect(path)
+    settings = dict(project.get("target", {}) or {})
+    if base is not None:
+        settings["base_addr"] = base
+    image = loader.load(path, settings)
+
     row = {
         "id": 1,
         "name": name or project.get("project.name", path.stem),
-        "platform": project.get("target.platform", "generic"),
-        "arch": project.get("target.arch", ""),
-        "endian": project.get("target.endian", "big"),
-        "ptr_size": project.get("target.ptr_size", 4),
-        "base_addr": base,
-        "image_path": str(path),
-        "image_sha256": sha,
-        "ghidra_lang": project.get("target.ghidra_lang", ""),
+        "platform": image.platform,
+        "arch": image.arch,
+        "endian": image.endian,
+        "ptr_size": image.ptr_size,
+        "base_addr": image.base,
+        "image_path": str(image.path),
+        "image_sha256": image.sha256,
+        "ghidra_lang": image.ghidra_lang,
         "recomp_path": project.get("target.recomp_path", ""),
-        "adapter": project.get("project.target_adapter", "rawimage"),
+        "adapter": loader.id,
     }
     project.db.upsert("target", row, "id")
-    ctx.record(sha256=sha, size=path.stat().st_size)
-    return ImportResult(
-        "image",
-        {"bytes": path.stat().st_size},
-        [f"{path.name} @ 0x{base:08X} sha={sha[:12]}"],
-    )
+
+    entries = loader.entry_points(image)
+    if entries:
+        with project.db.tx():
+            for addr in entries:
+                project.db.upsert("function", {"addr": addr}, "addr")
+
+    ctx.record(sha256=image.sha256, size=image.size, loader=loader.id)
+    notes = [f"{loader.id}: {image.brief()}"]
+    notes.extend(image.notes)
+    if entries:
+        notes.append(f"{len(entries)} entry point(s) from the image itself")
+    return ImportResult("image", {"bytes": image.size, "entries": len(entries)}, notes)
 
 
 # ---------------------------------------------------------------- lifted
