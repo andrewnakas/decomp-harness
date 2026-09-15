@@ -24,11 +24,13 @@ app = typer.Typer(
 import_app = typer.Typer(help="Ingest what is already known.", no_args_is_help=True)
 corpus_app = typer.Typer(help="Bound the work by call-graph closure.", no_args_is_help=True)
 queue_app = typer.Typer(help="What to work on next, and why.", no_args_is_help=True)
+subsystems_app = typer.Typer(help="Find the seams in a binary.", invoke_without_command=True)
 llm_app = typer.Typer(help="Provider smoke tests and the token ledger.", no_args_is_help=True)
 lesson_app = typer.Typer(help="Traps recorded as checks.", no_args_is_help=True)
 app.add_typer(import_app, name="import")
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(queue_app, name="queue")
+app.add_typer(subsystems_app, name="subsystems")
 app.add_typer(llm_app, name="llm")
 app.add_typer(lesson_app, name="lesson")
 
@@ -669,6 +671,43 @@ def hosts(
             rows.append(f"{name}\t{transport.host.ssh or 'local'}"
                         f"\t{transport.host.workdir}")
     out.emit("\n".join(rows))
+
+
+# ---------------------------------------------------------------- subsystems
+@subsystems_app.callback()
+def subsystems_main(
+    ctx: typer.Context,
+    min_size: Annotated[int, typer.Option(help="Smallest community to rank")] = 40,
+    max_size: Annotated[int, typer.Option(help="Largest community to rank")] = 2500,
+    top: Annotated[int, typer.Option(help="How many to show")] = 12,
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Rank the call graph's communities as candidate subsystems."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from ..pipeline.subsystems import discover
+
+    out.set_json(json_out)
+    out.emit(discover(_open(project), min_size=min_size, max_size=max_size,
+                      top=top, force=force))
+
+
+@subsystems_app.command("pick")
+def subsystems_pick(
+    community: Annotated[int, typer.Argument(help="Community id from the ranking")],
+    name: Annotated[str, typer.Option(help="Name for this subsystem")] = "",
+    max_depth: Annotated[int, typer.Option(help="Closure depth, 0 = unbounded")] = 0,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Adopt a community as a named subsystem and grow its corpus."""
+    from ..pipeline.subsystems import pick as pick_subsystem
+
+    out.set_json(json_out)
+    if not name:
+        out.fail("pass --name to say what this subsystem is")
+    result = pick_subsystem(_open(project), community, name, max_depth=max_depth)
+    out.emit(f"subsystem\t{result['name']}\tseeds={result['seeds']}"
+             f"\tcorpus={result['corpus']}")
 
 
 def main() -> None:
