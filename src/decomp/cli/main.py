@@ -730,6 +730,36 @@ def subsystems_pick(
              f"\tcorpus={result['corpus']}")
 
 
+@app.command()
+def loop(
+    n: Annotated[int, typer.Option("-n", help="Functions per round")] = 8,
+    rounds: Annotated[int, typer.Option(help="How many rounds")] = 1,
+    tier: Annotated[str, typer.Option(help="Restrict to a tier")] = "",
+    subsystem: Annotated[str, typer.Option(help="Restrict to a subsystem")] = "",
+    provider: Annotated[str, typer.Option(help="claude | codex | replay")] = "",
+    host: Annotated[str, typer.Option(help="Where to build and run")] = "",
+    profile: Annotated[str, typer.Option(help="boot | play | map")] = "play",
+    duration: Annotated[int, typer.Option(help="Session seconds")] = 120,
+    controls: Annotated[int, typer.Option(help="Controls to arm")] = 2,
+    no_session: Annotated[bool, typer.Option("--no-session",
+                          help="Stop after building")] = False,
+    max_cost: Annotated[float, typer.Option("--max-cost", help="Stop above this spend")] = 0.0,
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Run the whole cycle: queue, port, build, session, verify, promote.
+
+    Stops at the first stage that refuses, because a refusal means the rest of
+    the round would be measuring nothing.
+    """
+    from ..pipeline.loop import run as run_loop
+
+    out.set_json(json_out)
+    out.emit(run_loop(_open(project), n=n, rounds=rounds, tier=tier,
+                      subsystem=subsystem, provider=provider, host=host,
+                      profile=profile, duration_s=duration, controls=controls,
+                      no_session=no_session, max_cost_usd=max_cost))
+
+
 def main() -> None:
     app()
 
