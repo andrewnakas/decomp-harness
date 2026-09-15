@@ -22,9 +22,11 @@ app = typer.Typer(
     add_completion=False,
 )
 import_app = typer.Typer(help="Ingest what is already known.", no_args_is_help=True)
+corpus_app = typer.Typer(help="Bound the work by call-graph closure.", no_args_is_help=True)
 llm_app = typer.Typer(help="Provider smoke tests and the token ledger.", no_args_is_help=True)
 lesson_app = typer.Typer(help="Traps recorded as checks.", no_args_is_help=True)
 app.add_typer(import_app, name="import")
+app.add_typer(corpus_app, name="corpus")
 app.add_typer(llm_app, name="llm")
 app.add_typer(lesson_app, name="lesson")
 
@@ -371,6 +373,25 @@ def import_notes_cmd(
 
     out.set_json(json_out)
     out.emit(import_notes(_open(project), path=path, force=force))
+
+
+# -------------------------------------------------------------------- corpus
+@corpus_app.command("grow")
+def corpus_grow(
+    seeds: Annotated[list[str], typer.Argument(help="Seed addresses")] = None,
+    seed_file: Annotated[Optional[Path], typer.Option("--seed-file", help="File of addresses")] = None,
+    subsystem: Annotated[str, typer.Option(help="Name this corpus")] = "",
+    max_depth: Annotated[int, typer.Option(help="0 = unbounded")] = 0,
+    follow_helpers: Annotated[bool, typer.Option(help="Walk into runtime helpers too")] = False,
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Grow the corpus from seeds by following resolved guest calls."""
+    from ..pipeline.corpus import DEFAULT_STOP_KINDS, grow
+
+    out.set_json(json_out)
+    stop = () if follow_helpers else DEFAULT_STOP_KINDS
+    out.emit(grow(_open(project), seeds=list(seeds or []), seed_file=seed_file,
+                  subsystem=subsystem, max_depth=max_depth, stop_kinds=stop, force=force))
 
 
 def main() -> None:

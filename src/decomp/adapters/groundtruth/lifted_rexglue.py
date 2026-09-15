@@ -194,6 +194,60 @@ class RexGlueLifted(GroundTruth):
                 "names": {str(a): n for a, n in self._names.items()},
             }))
 
+    # ----------------------------------------------------------- call graph
+    def walk_callgraph(self):
+        """Yield (caller, callee_addr, callee_name, kind, line) for the whole corpus.
+
+        One streaming pass. Reading each body separately costs 47k file seeks;
+        this costs one read of each source file, which is what makes whole-corpus
+        closure practical rather than an overnight job.
+        """
+        names = self.names()
+        for path in self.sources():
+            current: int | None = None
+            depth = 0
+            started = False
+            pending: int | None = None
+            pending_line = 0
+            lookahead = 0
+
+            with open(path, errors="ignore") as fh:
+                for n, line in enumerate(fh):
+                    m = RE_DEFINE.search(line)
+                    if m:
+                        current = int(m.group(1), 16)
+                        depth, started = 0, False
+                        pending = None
+
+                    if current is not None:
+                        if pending is not None:
+                            call = RE_CALL.match(line)
+                            if call:
+                                yield _edge(current, pending, call.group(1), pending_line)
+                                pending = None
+                            else:
+                                lookahead -= 1
+                                if lookahead <= 0:
+                                    yield _edge(
+                                        current, pending,
+                                        names.get(pending, ""), pending_line,
+                                    )
+                                    pending = None
+                        else:
+                            bl = RE_BL.search(line)
+                            if bl:
+                                pending = int(bl.group(1), 16)
+                                pending_line, lookahead = n, 3
+                            elif RE_INDIRECT.search(line):
+                                yield (current, 0, "(indirect)", "indirect", n)
+
+                        opens = line.count("{")
+                        depth += opens - line.count("}")
+                        if opens:
+                            started = True
+                        if started and depth <= 0:
+                            current = None
+
     # ----------------------------------------------------------------- body
     def body(self, addr: int) -> str:
         if addr in self._body_cache:
@@ -410,6 +464,17 @@ class RexGlueLifted(GroundTruth):
         if max_lines and len(out) > max_lines:
             out = _elide_middle(out, max_lines)
         return "\n".join(out)
+
+
+def _edge(caller: int, target: int, symbol: str, line: int):
+    """One call-graph edge, classified by the symbol the lifter resolved."""
+    if not symbol:
+        return (caller, target, f"sub_{target:08X}", "unresolved", line)
+    if symbol.startswith("__imp__"):
+        return (caller, target, symbol, "import", line)
+    if symbol.startswith("__"):
+        return (caller, target, symbol, "helper", line)
+    return (caller, target, symbol, "direct", line)
 
 
 def _elide_middle(lines: list[str], max_lines: int) -> list[str]:
