@@ -316,3 +316,131 @@ def test_dry_run_builds_the_packet_without_calling(portable):
     assert "dry run" in outcome.error
     assert outcome.tokens > 0
     assert portable.db.scalar("SELECT COUNT(*) FROM llm_call") == 0
+
+
+# -------------------------------------------------------------------- batch
+def _batch_cassette(project, addrs, payloads):
+    """A cassette for the batch call the loop will make."""
+    from decomp.adapters.provider import get_provider
+    from decomp.adapters.provider.base import LLMRequest
+    from decomp.llm import prefix as prefix_mod
+    from decomp.views import packet as packet_mod
+
+    provider = get_provider(project, "replay")
+    packets = [packet_mod.build(project, a).text for a in addrs]
+    prompt = (
+        f"{len(addrs)} functions follow. Answer all of them, as an object with a "
+        f"`ports` array holding one entry per function in the order given.\n\n"
+        + "\n\n".join(packets)
+    )
+    req = LLMRequest(prompt=prompt, prefix=prefix_mod.build(project).text,
+                     purpose="batch")
+    path = provider.dir / f"{provider.key(req)}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "ok": True, "structured": {"ports": payloads}, "text": "",
+        "usage": {"input_tokens": 900, "output_tokens": 300,
+                  "cache_read_tokens": 1800},
+        "cost_usd": 0.012, "model": "replay-small",
+    }))
+
+
+def _answer(addr: str) -> dict:
+    return {
+        "addr": addr,
+        "code": "REX_STORE_U32(ctx.r3.u32 + 8, ctx.r4.u32);",
+        "windows": [{"base": "r3", "offset": 8, "length": 4}],
+        "result_registers": ["r3"],
+    }
+
+
+@pytest.fixture
+def batchable_project(project, fixtures, tmp_path):
+    from decomp.pipeline.importer import import_lifted, import_xrefs
+    from decomp.pipeline.queue import build as queue_build
+    from decomp.pipeline.screen import screen
+
+    import_lifted(project, path=fixtures / "lifted")
+    project.db.execute("UPDATE function SET in_corpus=1 WHERE addr < 0x82F00000")
+    import_xrefs(project, scope="corpus")
+    screen(project)
+    queue_build(project)
+    project.config["providers"]["default"] = "replay"
+    project.config["providers"]["replay"] = {"dir": str(tmp_path / "cassettes")}
+    return project
+
+
+def test_small_functions_share_one_call(batchable_project):
+    """The fixed prefix is paid once per call, and a provider that opens a fresh
+    session each time pays it again every call."""
+    from decomp.pipeline.port import port_many
+
+    addrs = [0x82B10000, 0x82B10300]
+    for addr in addrs:
+        batchable_project.db.upsert(
+            "function",
+            {"addr": addr, "difficulty": 0.05, "lifted_lines": 10, "gate": None},
+            "addr",
+        )
+    _batch_cassette(batchable_project, addrs,
+                    [_answer(f"{a:08X}") for a in addrs])
+
+    result = port_many(batchable_project, addrs, allow_draft=False)
+    assert result.written == 2
+    # One call, not two.
+    assert batchable_project.db.scalar(
+        "SELECT COUNT(*) FROM llm_call WHERE purpose='batch'"
+    ) == 1
+    # Each port carries its share of what the batch cost.
+    assert all(o.tokens == (900 + 300) // 2 for o in result.outcomes if o.ok)
+
+
+def test_a_bad_answer_in_a_batch_is_retried_alone(batchable_project):
+    """One wrong answer must not spoil the others, and correcting it should not
+    re-send the ones that were right."""
+    from decomp.pipeline.port import port_many
+
+    addrs = [0x82B10000, 0x82B10300]
+    for addr in addrs:
+        batchable_project.db.upsert(
+            "function",
+            {"addr": addr, "difficulty": 0.05, "lifted_lines": 10, "gate": None},
+            "addr",
+        )
+    bad = _answer(f"{addrs[1]:08X}")
+    bad["windows"] = []            # writes memory but declares nothing
+    _batch_cassette(batchable_project, addrs, [_answer(f"{addrs[0]:08X}"), bad])
+
+    result = port_many(batchable_project, addrs, allow_draft=False)
+    by_addr = {o.addr: o for o in result.outcomes}
+    assert by_addr[addrs[0]].ok                  # the good one stands
+    assert not by_addr[addrs[1]].ok              # the bad one was sent back alone
+
+
+def test_a_short_batch_answer_is_refused(batchable_project):
+    """Dropping a function silently would lose it from the round."""
+    from decomp.pipeline.port import port_many
+
+    addrs = [0x82B10000, 0x82B10300]
+    for addr in addrs:
+        batchable_project.db.upsert(
+            "function",
+            {"addr": addr, "difficulty": 0.05, "lifted_lines": 10, "gate": None},
+            "addr",
+        )
+    _batch_cassette(batchable_project, addrs, [_answer(f"{addrs[0]:08X}")])
+
+    result = port_many(batchable_project, addrs, allow_draft=False)
+    assert len(result.outcomes) == 2             # both accounted for
+
+
+def test_work_the_translator_handles_never_enters_a_batch(batchable_project):
+    """It costs nothing, so paying for it in a batch would be a waste."""
+    from decomp.pipeline.port import port_many
+
+    result = port_many(batchable_project, [0x82B10300], allow_draft=True)
+    assert result.outcomes[0].model == "mechanical"
+    assert result.outcomes[0].tokens == 0
+    assert batchable_project.db.scalar(
+        "SELECT COUNT(*) FROM llm_call WHERE purpose='batch'"
+    ) == 0

@@ -184,9 +184,13 @@ def port_one(project: Project, addr: int, provider_name: str = "",
     out_dir = Path(out_dir) if out_dir else project.sub("ports")
 
     if allow_draft and not dry_run:
-        drafted = try_draft(project, addr, fn, out_dir)
-        if drafted is not None:
-            return drafted
+        existing = project.db.one(
+            "SELECT status FROM port WHERE addr=? AND source='mechanical'", (addr,)
+        )
+        if existing is None:
+            drafted = try_draft(project, addr, fn, out_dir)
+            if drafted is not None:
+                return drafted
 
     resolved_tier = tier or difficulty_mod.tier_for(
         fn.get("difficulty") or 0.5, bool(fn.get("vmx128")), fn.get("attempts") or 0
@@ -359,12 +363,177 @@ def _record(project: Project, addr: int, answer: PortAnswer | None, status: str,
         )
 
 
-def port_many(project: Project, addrs: list[int], **kw: Any) -> PortRunResult:
-    outcomes = []
+def port_batch(project: Project, addrs: list[int], provider_name: str = "",
+               model: str = "", tier: str = "", out_dir: Path | None = None
+               ) -> list[PortOutcome] | None:
+    """Ask for several small functions in one call.
+
+    The prefix is the same for every function in a run, and a provider that
+    caches it well makes this barely matter. Codex opens a fresh session per
+    invocation and cached only 54% of its input across a real run, so the fixed
+    cost is paid again on every call; sharing it across a batch is where that
+    goes back.
+
+    Returns None when the batch cannot be used, so the caller falls back to
+    asking one at a time rather than losing the work.
+    """
+    from ..adapters.provider import LLMRequest, get_provider
+    from ..llm import prefix as prefix_mod
+    from ..llm.schemas import BatchAnswer, json_schema, parse_batch_answer
+    from ..queue import difficulty as difficulty_mod
+    from ..views import packet as packet_mod
+
+    if len(addrs) < 2:
+        return None
+
+    provider = get_provider(project, provider_name or None)
+    prefix = prefix_mod.build(project)
+    out_dir = Path(out_dir) if out_dir else project.sub("ports")
+    work_dir = project.work_dir / f"batch_{addrs[0]:08X}"
+
+    packets = []
+    total_tokens = 0
     for addr in addrs:
+        pkt = packet_mod.build(project, addr)
+        packets.append(pkt.text)
+        total_tokens += pkt.tokens
+    if total_tokens > project.get("budget.packet_tokens_max", 6000):
+        return None
+
+    prompt = (
+        f"{len(addrs)} functions follow. Answer all of them, as an object with a "
+        f"`ports` array holding one entry per function in the order given.\n\n"
+        + "\n\n".join(packets)
+    )
+
+    req = LLMRequest(
+        prompt=prompt, prefix=prefix.text, schema=json_schema(BatchAnswer),
+        tier=tier or "small", model=model, max_turns=PORT_MAX_TURNS,
+        cwd=work_dir, purpose="batch", addrs=list(addrs),
+        cache_ttl=project.get("providers.claude.cache_ttl", "1h"),
+        effort=difficulty_mod.effort_for(tier or "small"),
+    )
+    result = provider.call(req)
+    ledger.record(project, provider.id, req, result, packet_tokens_est=total_tokens)
+
+    if not result.ok:
+        return None
+    try:
+        answers = parse_batch_answer(result.structured)
+    except ValueError:
+        return None
+    if len(answers) != len(addrs):
+        # A short answer would silently drop functions from the round.
+        return None
+
+    # Cost is shared across the batch, so each port carries its own share.
+    spent = result.usage.input_tokens + result.usage.output_tokens
+    share_tokens = spent // len(addrs)
+    share_cost = (result.cost_usd or 0.0) / len(addrs)
+
+    outcomes: list[PortOutcome] = []
+    for addr, answer in zip(addrs, answers, strict=True):
+        outcome = PortOutcome(addr=addr, ok=False, status="pending", attempts=1,
+                              tokens=share_tokens, cost_usd=share_cost,
+                              model=result.model or "batch")
+        if answer.blocked:
+            outcome.blocked = answer.blocked
+            outcome.status = answer.blocked
+            outcome.note = answer.note
+            _record(project, addr, answer, status=answer.blocked, path=None,
+                    attempts=1)
+            outcomes.append(outcome)
+            continue
+
+        report = lint.check(
+            answer, expected_addr=addr,
+            budget_bytes=project.get("oracle.window_budget_bytes", 32768),
+            budget_spans=project.get("oracle.window_budget_spans", 32),
+        )
+        if not report.ok:
+            # One bad answer does not spoil the batch: it is retried alone,
+            # where a correction can be sent without re-sending the others.
+            outcome.error = report.feedback()
+            outcomes.append(outcome)
+            continue
+
+        artifact = emit.write(
+            answer, addr, out_dir,
+            macro=project.get("oracle.port_macro", "SKATE3_PORT"),
+            status="written",
+            provenance=f"{provider.id} {outcome.model}, batch of {len(addrs)}",
+        )
+        _record(project, addr, answer, status="written", path=artifact.path,
+                attempts=1)
+        outcome.ok = True
+        outcome.status = "written"
+        outcome.path = artifact.path
+        outcome.note = answer.note
+        outcomes.append(outcome)
+
+    return outcomes
+
+
+def port_many(project: Project, addrs: list[int], batch_size: int = 0,
+              **kw: Any) -> PortRunResult:
+    """Port a set of functions, batching the small ones where it pays."""
+    from ..queue import difficulty as difficulty_mod
+
+    batch_size = batch_size or project.get("budget.batch_size", 6)
+    outcomes: list[PortOutcome] = []
+    pending: list[int] = []
+
+    def flush() -> None:
+        """Send the accumulated batch, falling back to one at a time."""
+        nonlocal pending
+        if not pending:
+            return
+        group, pending = pending, []
+        batched = None
+        if len(group) > 1 and not kw.get("dry_run"):
+            batched = port_batch(
+                project, group,
+                provider_name=kw.get("provider_name") or "",
+                model=kw.get("model", ""), tier=kw.get("tier", ""),
+                out_dir=kw.get("out_dir"),
+            )
+        if batched is None:
+            for addr in group:
+                outcomes.append(_one(addr))
+            return
+        for outcome in batched:
+            # Anything the batch could not settle is asked again on its own.
+            outcomes.append(outcome if outcome.ok or outcome.blocked
+                            else _one(outcome.addr))
+
+    def _one(addr: int) -> PortOutcome:
         try:
-            outcomes.append(port_one(project, addr, **kw))
+            return port_one(project, addr, **kw)
         except KeyError as exc:
-            outcomes.append(PortOutcome(addr=addr, ok=False, status="error",
-                                        error=str(exc)))
+            return PortOutcome(addr=addr, ok=False, status="error", error=str(exc))
+
+    for addr in addrs:
+        fn = project.db.one("SELECT * FROM function WHERE addr=?", (addr,)) or {}
+        score = fn.get("difficulty") or 0.0
+
+        # A function the translator can handle costs nothing, so it never goes
+        # into a batch that would be paid for.
+        if kw.get("allow_draft", True) and not kw.get("dry_run"):
+            drafted = try_draft(project, addr, fn,
+                                Path(kw.get("out_dir") or project.sub("ports")))
+            if drafted is not None:
+                outcomes.append(drafted)
+                continue
+
+        if difficulty_mod.batchable(fn, score,
+                                    project.get("budget.batch_max_lines", 40)):
+            pending.append(addr)
+            if len(pending) >= batch_size:
+                flush()
+            continue
+
+        flush()
+        outcomes.append(_one(addr))
+
+    flush()
     return PortRunResult(outcomes=outcomes)
