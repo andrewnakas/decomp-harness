@@ -939,6 +939,48 @@ def lint(
 EXPECTED = (FileNotFoundError, ValueError, KeyError, RuntimeError)
 
 
+@app.command()
+def auto(
+    provider: Annotated[str, typer.Option(help="claude | codex | replay")] = "",
+    batch: Annotated[int, typer.Option("-n", help="Functions per round")] = 8,
+    subsystem: Annotated[str, typer.Option(help="Restrict to one subsystem")] = "",
+    tier: Annotated[str, typer.Option(help="Restrict to a tier")] = "",
+    max_cost: Annotated[float, typer.Option("--max-cost",
+                        help="Stop above this spend, in dollars")] = 5.0,
+    max_minutes: Annotated[float, typer.Option("--max-minutes",
+                           help="Stop after this long; 0 means no limit")] = 0.0,
+    max_rounds: Annotated[int, typer.Option("--max-rounds",
+                          help="Stop after this many rounds; 0 means no limit")] = 0,
+    verify: Annotated[bool, typer.Option("--verify",
+                      help="Also build and run a session each round")] = False,
+    host: Annotated[str, typer.Option(help="Where to build and run")] = "",
+    project: ProjectOpt = None, json_out: JsonOpt = False,
+):
+    """Keep porting unattended until the queue empties or a limit is reached.
+
+    Writes and lints ports without verifying them, unless --verify is given and
+    a build host is configured. Stops on an empty queue, the spend ceiling, the
+    time limit, or repeated failure - the last because a broken setup fails
+    every round the same way, and a loop without a circuit breaker pays for all
+    of them.
+    """
+    from ..pipeline.auto import run as run_auto
+
+    out.set_json(json_out)
+    proj = _open(project)
+
+    def echo(round_result):
+        if not json_out:
+            print(round_result.brief().splitlines()[0], flush=True)
+            for line in round_result.brief().splitlines()[1:3]:
+                print(line, flush=True)
+
+    out.emit(run_auto(proj, batch=batch, provider=provider, subsystem=subsystem,
+                      tier=tier, max_cost_usd=max_cost, max_minutes=max_minutes,
+                      max_rounds=max_rounds, port_only=not verify, host=host,
+                      echo=None if json_out else echo))
+
+
 def main() -> None:
     try:
         app()

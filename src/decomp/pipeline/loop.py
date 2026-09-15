@@ -82,8 +82,15 @@ def run(project: Project, n: int = 8, rounds: int = 1, tier: str = "",
         subsystem: str = "", provider: str = "", host: str = "",
         profile: str = "play", duration_s: int = 120, controls: int = 2,
         verify_only: bool = False, no_session: bool = False,
-        max_cost_usd: float = 0.0) -> LoopResult:
-    """Run the cycle `rounds` times, stopping early on a refusal."""
+        port_only: bool = False, max_cost_usd: float = 0.0,
+        on_round=None) -> LoopResult:
+    """Run the cycle `rounds` times, stopping early on a refusal.
+
+    `port_only` authors and lints without building or running anything, which is
+    what an unattended run does when there is no machine to verify on. Those
+    ports are recorded as written, never as verified, because nothing has
+    checked them.
+    """
     from . import build as build_stage
     from . import port as port_stage
     from . import promote as promote_stage
@@ -104,6 +111,8 @@ def run(project: Project, n: int = 8, rounds: int = 1, tier: str = "",
             round_result.stopped_at = "queue"
             round_result.why = "nothing open to work on"
             result.rounds.append(round_result)
+            if on_round is not None:
+                on_round(round_result)
             break
         round_result.stages.append(
             f"queue\tpicked {len(picks.items)} of {picks.total_open} open"
@@ -136,7 +145,18 @@ def run(project: Project, n: int = 8, rounds: int = 1, tier: str = "",
             round_result.stopped_at = "port"
             round_result.why = "nothing was written, so there is nothing to build"
             result.rounds.append(round_result)
+            if on_round is not None:
+                on_round(round_result)
             break
+
+        if port_only:
+            round_result.stages.append(
+                "build\tskipped: authoring only, so nothing is verified"
+            )
+            result.rounds.append(round_result)
+            if on_round is not None:
+                on_round(round_result)
+            continue
 
         # --- build ---------------------------------------------------------
         # A stage that is not configured yet is a stop with an instruction, not
@@ -194,5 +214,7 @@ def run(project: Project, n: int = 8, rounds: int = 1, tier: str = "",
             f"promote\tpromoted={promoted.promoted} held={promoted.held}"
         )
         result.rounds.append(round_result)
+        if on_round is not None:
+            on_round(round_result)
 
     return result

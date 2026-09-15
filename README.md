@@ -19,7 +19,7 @@ deterministic oracle agrees.
 decomp import lifted ./generated        # 47,652 functions indexed in 5s
 decomp subsystems                       # 124 communities found in the call graph
 decomp screen                           # 1,692 functions triaged, no tokens
-decomp loop -n 8 --host linux           # port, build, verify, promote
+decomp auto --provider codex --max-cost 20   # keep going unattended
 decomp cost --by model                  # tokens per verified function
 ```
 
@@ -97,6 +97,7 @@ work, so the comparison is against what this replaces.
 
 - [Design](docs/design.md) — the shape and the reasoning
 - [Providers](docs/providers.md) — Claude, Codex, and replay
+- [Running unattended](docs/unattended.md) — `decomp auto` and when it stops
 - [Adapters](docs/adapters.md) — how to target something else
 - [Data model](docs/data-model.md) — evidence, states, the ledger
 - [Skate 3 runbook](docs/skate3-runbook.md) — the real sequence, with real numbers
