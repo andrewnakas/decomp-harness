@@ -443,16 +443,34 @@ def _make_callee(addr: int | None, name: str, line: int) -> Callee:
 
 
 def from_project(project: "Project") -> RexGlueLifted:
-    """Build the adapter from project config."""
-    generated = project.get("target.lifted_dir") or project.get("truth.generated_dir")
+    """Build the adapter for a project.
+
+    The directory actually imported wins over configuration: `decomp import
+    lifted <dir>` records where the corpus came from, and later stages must read
+    the same tree rather than whatever the config file happens to say.
+    """
+    generated = (
+        project.db.meta_get(INDEX_META_KEY.replace(".index", ".dir"))
+        or project.db.meta_get("truth.lifted_dir")
+        or project.get("target.lifted_dir")
+        or project.get("truth.generated_dir")
+    )
     if not generated:
         recomp = project.get("target.recomp_path")
         if recomp:
             generated = str(Path(recomp) / "generated")
     if not generated:
-        raise KeyError("set target.lifted_dir (or target.recomp_path) in decomp.toml")
+        raise KeyError(
+            "no lifted corpus known: run `decomp import lifted <dir>`, "
+            "or set target.lifted_dir in decomp.toml"
+        )
+    pattern = (
+        project.db.meta_get("truth.lifted_pattern")
+        or project.get("truth.pattern")
+        or "*_recomp.*.cpp"
+    )
     return RexGlueLifted(
         generated,
-        pattern=project.get("truth.pattern", "*_recomp.*.cpp"),
+        pattern=pattern,
         cache_path=project.state / "cache" / "lifted_index.json",
     )

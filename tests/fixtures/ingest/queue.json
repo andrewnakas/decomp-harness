@@ -1,0 +1,9 @@
+{
+  "82B28A00": {"addr": "82B28A00", "status": "verified", "tier": "A",
+               "calls": {"boot": 12, "play": 6706}, "lines": 41,
+               "thread": "RwAudioCore Dac", "attempts": 1,
+               "note": "Command queue producer. Appends handler records."},
+  "82B3C930": {"addr": "82B3C930", "status": "gate1", "tier": "D",
+               "gate": "gate1", "gate1_reason": "indirect call",
+               "calls": {"boot": 1, "play": 0}, "attempts": 0}
+}

@@ -21,8 +21,10 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+import_app = typer.Typer(help="Ingest what is already known.", no_args_is_help=True)
 llm_app = typer.Typer(help="Provider smoke tests and the token ledger.", no_args_is_help=True)
 lesson_app = typer.Typer(help="Traps recorded as checks.", no_args_is_help=True)
+app.add_typer(import_app, name="import")
 app.add_typer(llm_app, name="llm")
 app.add_typer(lesson_app, name="lesson")
 
@@ -260,6 +262,115 @@ def status(project: ProjectOpt = None, json_out: JsonOpt = False):
 
     out.set_json(json_out)
     out.emit(run_status(_open(project)))
+
+
+# -------------------------------------------------------------------- import
+ForceOpt = Annotated[bool, typer.Option("--force", help="Rerun even if inputs are unchanged")]
+
+
+@import_app.command("image")
+def import_image_cmd(
+    path: Annotated[Path, typer.Argument(help="Decrypted image or executable")],
+    base: Annotated[str, typer.Option(help="Load address, e.g. 0x82000000")] = "",
+    name: Annotated[str, typer.Option(help="Target name")] = "",
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Register the target image."""
+    from ..pipeline.importer import import_image
+
+    out.set_json(json_out)
+    proj = _open(project)
+    base_val = int(base, 0) if base else None
+    out.emit(import_image(proj, path=path, base=base_val, name=name, force=force))
+
+
+@import_app.command("lifted")
+def import_lifted_cmd(
+    path: Annotated[Path, typer.Argument(help="Directory of lifted C++ sources")],
+    pattern: Annotated[str, typer.Option(help="Source glob")] = "*_recomp.*.cpp",
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Index a static recompiler's output: functions, names, boundaries."""
+    from ..pipeline.importer import import_lifted
+
+    out.set_json(json_out)
+    out.emit(import_lifted(_open(project), path=path, pattern=pattern, force=force))
+
+
+@import_app.command("xrefs")
+def import_xrefs_cmd(
+    scope: Annotated[str, typer.Option(help="corpus | all")] = "corpus",
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Record call edges and folded constants for functions in scope."""
+    from ..pipeline.importer import import_xrefs
+
+    out.set_json(json_out)
+    out.emit(import_xrefs(_open(project), scope=scope, force=force))
+
+
+@import_app.command("names")
+def import_names_cmd(
+    path: Annotated[Path, typer.Argument(help="CSV addr,name or TOML table")],
+    kind: Annotated[str, typer.Option(help="Evidence kind")] = "ingest",
+    confidence: Annotated[float, typer.Option(help="0-1")] = 0.8,
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Import recovered symbol names as evidence."""
+    from ..pipeline.importer import import_names
+
+    out.set_json(json_out)
+    out.emit(import_names(_open(project), path=path, kind=kind,
+                          confidence=confidence, force=force))
+
+
+@import_app.command("structs")
+def import_structs_cmd(
+    path: Annotated[Path, typer.Argument(help="Recovered-layout C header")],
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Import struct layouts with their offset citations."""
+    from ..pipeline.importer import import_structs
+
+    out.set_json(json_out)
+    out.emit(import_structs(_open(project), path=path, force=force))
+
+
+@import_app.command("trace")
+def import_trace_cmd(
+    path: Annotated[Path, typer.Argument(help="Guest execution trace")],
+    profile: Annotated[str, typer.Option(help="boot | play | map")] = "play",
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Import an execution trace: call counts and thread attribution."""
+    from ..pipeline.importer import import_trace
+
+    out.set_json(json_out)
+    out.emit(import_trace(_open(project), path=path, profile=profile, force=force))
+
+
+@import_app.command("queue")
+def import_queue_cmd(
+    path: Annotated[Path, typer.Argument(help="Previous queue.json")],
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Import prior statuses, gates and verdicts."""
+    from ..pipeline.importer import import_queue
+
+    out.set_json(json_out)
+    out.emit(import_queue(_open(project), path=path, force=force))
+
+
+@import_app.command("notes")
+def import_notes_cmd(
+    path: Annotated[Path, typer.Argument(help="Directory of sub_*.md notes")],
+    project: ProjectOpt = None, json_out: JsonOpt = False, force: ForceOpt = False,
+):
+    """Import per-function notes, trimmed to packet size."""
+    from ..pipeline.importer import import_notes
+
+    out.set_json(json_out)
+    out.emit(import_notes(_open(project), path=path, force=force))
 
 
 def main() -> None:

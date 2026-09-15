@@ -1,0 +1,5 @@
+# seq	dcycles	thread	function	r3	r4	r5
+1	1000	RwAudioCore Dac	82B28A00	0	0	0
+2	1100	RwAudioCore Dac	82B48A50	0	0	0
+3	1200	main	82B10000	0	0	0
+4	1300	RwAudioCore Dac	82B28A00	0	0	0
