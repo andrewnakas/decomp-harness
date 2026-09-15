@@ -144,3 +144,29 @@ def test_discovery_without_a_call_graph_is_an_error(project):
 
     with pytest.raises(ValueError, match="no call graph"):
         discover(project)
+
+
+def test_rediscovery_clears_its_own_stale_rows(graphed):
+    """Community numbering depends on the graph, so a row from an earlier run
+    names an id the current ranking no longer uses."""
+    from decomp.pipeline.subsystems import discover
+
+    graphed.db.upsert(
+        "subsystem", {"name": "community-999999", "size": 5, "chosen": 0}, "name"
+    )
+    discover(graphed, min_size=3, force=True)
+
+    names = {r["name"] for r in graphed.db.query("SELECT name FROM subsystem")}
+    assert "community-999999" not in names
+
+
+def test_an_adopted_subsystem_survives_rediscovery(graphed):
+    """A name someone chose is theirs; only the generated rows are transient."""
+    from decomp.pipeline.subsystems import discover, pick
+
+    result = discover(graphed, min_size=3)
+    pick(graphed, result.candidates[0].id, "physics")
+
+    discover(graphed, min_size=3, force=True)
+    row = graphed.db.one("SELECT * FROM subsystem WHERE name='physics'")
+    assert row is not None and row["chosen"] == 1

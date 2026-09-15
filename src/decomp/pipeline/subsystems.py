@@ -191,6 +191,13 @@ def discover(project: Project, ctx, min_size: int = 40, max_size: int = 2500,
     ranked = candidates[:top]
 
     with project.db.tx():
+        # Community numbering depends on what the graph looks like now, so rows
+        # from an earlier run name ids this ranking no longer uses. Clear the
+        # unchosen ones first; a subsystem someone adopted keeps its name and is
+        # never touched.
+        project.db.execute(
+            "DELETE FROM subsystem WHERE name LIKE 'community-%' AND chosen=0"
+        )
         for c in ranked:
             project.db.upsert(
                 "subsystem",
